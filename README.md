@@ -1,43 +1,108 @@
-这份教程已经为您重新整理完毕，您可以直接将其作为您 **GitHub 仓库的 `README.md` 文档**。它涵盖了从功能介绍、环境准备到部署运行的全过程。
+这是一份为您精心整理的 **中英文双语版** `README.md` 教程。它采用了国际通用的开源项目排版风格，非常适合上传到 GitHub。
 
 ---
 
-# MMDVM Telegram & 微信通联监控助手
+# MMDVM Telegram & WeChat Notifier 📡
 
-这是一个专为 Pi-Star 全数字热点板设计的 Python 监控脚本。它能实时监听 MMDVM 日志，并将有效的 DMR 通联动态推送到您的手机（Telegram 和微信同步）。
+### Pi-Star 通联实时监控助手
 
-### ✨ 核心功能
+[English](https://www.google.com/search?q=%23english) | [中文说明](https://www.google.com/search?q=%23chinese)
 
-* **双平台推送**：Telegram (Markdown 精美卡片) + 微信 (PushPlus 模板消息)。
-* **智能 QO 判定**：仅推送时长 **> 5秒** 的有效通联，自动过滤掉握手、测机等短信号。
+---
+
+<a name="english"></a>
+
+## English Version
+
+### ✨ Features
+
+* **Dual Platform Notification**: Real-time alerts to both **Telegram** (Rich Markdown) and **WeChat** (via PushPlus).
+* **Smart QSO Filtering**: Only notifies when transmission duration is **> 5 seconds**, effectively filtering out "kerchunking" or short pings.
+* **Mode Recognition**: Automatically distinguishes between 🎙️ **Voice** and 💾 **Data** transmissions.
+* **Timezone Correction**: Automatically converts MMDVM UTC logs to **Local Time (Beijing Time)**.
+* **Zero Maintenance**: Supports automatic log rotation (daily logs) without service restarts.
+* **Self-Call Filtering**: Automatically ignores your own callsign to prevent notification loops.
+
+### 🛠️ Installation
+
+#### 1. Prepare Environment
+
+Enable write mode on your Pi-Star:
+
+```bash
+rpi-rw
+
+```
+
+#### 2. Get Your Tokens
+
+* **Telegram**: Create a bot via `@BotFather` to get `TOKEN`. Get your `CHAT_ID` via `@userinfobot`.
+* **WeChat**: Follow the WeChat Official Account `pushplus推送加` to get your `Token`.
+
+#### 3. Deploy Script
+
+Create the Python script:
+
+```bash
+nano ~/mmdvm_notify.py
+
+```
+
+*(Paste the provided full code and update your Tokens/Callsign)*
+
+#### 4. Configure Service (Auto-start)
+
+Create a systemd service:
+
+```bash
+sudo nano /etc/systemd/system/mmdvm_notify.service
+
+```
+
+Paste the following:
+
+```ini
+[Unit]
+Description=MMDVM Notifier
+After=network.target mmdvmhost.service
+
+[Service]
+User=root
+ExecStart=/usr/bin/python3 /home/pi-star/mmdvm_notify.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+```
+
+Start it:
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now mmdvm_notify.service
+
+```
+
+---
+
+<a name="chinese"></a>
+
+## 中文说明
+
+### ✨ 功能特性
+
+* **双平台同步推送**：支持 **Telegram** (精美卡片) 与 **微信** (通过 PushPlus) 实时提醒。
+* **智能通联判定**：仅推送时长 **> 5 秒** 的有效通联，自动过滤掉握手、测机等短信号。
 * **模式识别**：自动识别 🎙️ **话音(Voice)** 与 💾 **数据(Data)** 传输。
-* **自动转换**：将日志中的 UTC 时间自动转换为 **北京时间**。
-* **零维护**：支持跨天日志自动切换，无需每日重启服务。
-* **过滤机制**：自动隐藏您自己呼号的发射记录，避免“刷屏”。
-
----
-
-### 📱 推送效果预览
-
-**Telegram 样式：**
-
-> ## 🎙️ **话音通联结束**
-> 
-> 
-> 👤 **呼号**: `BD4XYZ`
-> 👥 **群组**: `TG 46001`
-> 📅 **日期**: `2025-12-31`
-> ⏰ **时间**: `10:30:05`
-> 📡 **时隙**: `2`
-> ⏳ **时长**: `15.5 秒`
-
----
+* **时区自动转换**：将日志中的 UTC 时间自动转换为 **北京时间**。
+* **零维护运行**：支持跨天日志自动切换，无需每日手动重启。
+* **呼号过滤**：自动隐藏您自己呼号的发射记录，避免消息重复。
 
 ### 🛠️ 部署步骤
 
 #### 1. 环境准备
 
-确保您的 Pi-Star 处于可读写模式：
+确保 Pi-Star 处于可读写模式：
 
 ```bash
 rpi-rw
@@ -46,19 +111,19 @@ rpi-rw
 
 #### 2. 获取推送 Token
 
-* **Telegram**: 找 `@BotFather` 创建机器人获取 `TOKEN`，找 `@userinfobot` 获取 `CHAT_ID`。
-* **微信**: 关注公众号 `pushplus推送加`，在菜单栏获取您的 `Token`。
+* **Telegram**: 找 `@BotFather` 获取 `TOKEN`，找 `@userinfobot` 获取 `CHAT_ID`。
+* **微信**: 微信关注公众号 `pushplus推送加`，在菜单栏获取您的 `Token`。
 
-#### 3. 创建监控脚本
+#### 3. 创建脚本
 
-在 `/home/pi-star/` 目录下创建脚本：
+创建 Python 脚本：
 
 ```bash
 nano ~/mmdvm_notify.py
 
 ```
 
-将完整代码（见上文）粘贴进去，并修改 **配置区域** 的 Token 和呼号。
+*(在此处粘贴完整代码，并修改配置区域的 Token 和个人呼号)*
 
 #### 4. 配置开机自启
 
@@ -78,45 +143,28 @@ After=network.target mmdvmhost.service
 
 [Service]
 User=root
-WorkingDirectory=/home/pi-star
 ExecStart=/usr/bin/python3 /home/pi-star/mmdvm_notify.py
 Restart=always
-RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 
 ```
 
-#### 5. 启动服务
+最后启动服务：
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable mmdvm_notify.service
-sudo systemctl start mmdvm_notify.service
+sudo systemctl daemon-reload && sudo systemctl enable --now mmdvm_notify.service
 
 ```
 
 ---
 
-### ⚙️ 管理命令
+### ⚙️ Commands / 常用命令
 
-* **查看运行状态**：`sudo systemctl status mmdvm_notify.service`
-* **实时查看日志**：`sudo journalctl -u mmdvm_notify.service -f`
-* **暂停推送**：`sudo systemctl stop mmdvm_notify.service`
-* **恢复推送**：`sudo systemctl start mmdvm_notify.service`
-
----
-
-### 📝 注意事项
-
-1. **网络环境**：请确保您的树莓派能够正常连接 Telegram 服务器。
-2. **时长过滤**：默认设置为 5 秒，如需修改，请调整脚本中的 `MIN_DURATION` 变量。
-3. **权限**：如果无法读取日志，请确保脚本以 `root` 权限运行。
-
----
+* **Status / 状态**: `sudo systemctl status mmdvm_notify.service`
+* **Logs / 日志**: `sudo journalctl -u mmdvm_notify.service -f`
 
 **73 de BA4SMQ**
-*如果您觉得好用，欢迎在 GitHub 上点个 Star！*
 
 ---
