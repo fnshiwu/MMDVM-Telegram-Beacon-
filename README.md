@@ -25,7 +25,7 @@
 1. **运行环境初始化**：
 ```bash
 rpi-rw
-wget -qO- https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2 | bash
+wget -qO- https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2
 
 ```
 
@@ -61,7 +61,7 @@ A real-time notification tool for Pi-Star, allowing users to receive MMDVM activ
 1. **Initialization**:
 ```bash
 rpi-rw
-wget -qO- https://raw.githubusercontent.com/YourUser/MMDVM-Push/main/install.sh | bash
+wget -qO- blob:https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2
 
 ```
 
