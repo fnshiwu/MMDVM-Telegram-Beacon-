@@ -25,7 +25,7 @@
 1. **运行环境初始化**：
 ```bash
 rpi-rw
-wget -qO- https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2
+wget -qO- [https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2](https://github.com/fnshiwu/MMDVM-Telegram-WeChat-Notifier/blob/main/install.sh)
 
 ```
 
@@ -61,7 +61,7 @@ A real-time notification tool for Pi-Star, allowing users to receive MMDVM activ
 1. **Initialization**:
 ```bash
 rpi-rw
-wget -qO- blob:https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2
+wget -qO- [blob:https://github.com/1b95633f-ad90-4832-8c3e-3621373a0ae2](https://github.com/fnshiwu/MMDVM-Telegram-WeChat-Notifier/blob/main/install.sh)
 
 ```
 
