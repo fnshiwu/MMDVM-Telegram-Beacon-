@@ -1,47 +1,34 @@
 #!/bin/bash
-# MMDVM Push Notifier Installer by BA4SMQ
-# Usage: sudo bash install.sh
+# MMDVM-Push-Notifier 安装脚本
+# 开发者: BA4SMQ
 
-echo "Starting installation..."
 rpi-rw
 
-# 1. 创建目录
-mkdir -p /home/pi-star/MMDVM-Push-Notifier
+echo "1. 创建并设置目录权限..."
+INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
+sudo mkdir -p $INSTALL_DIR
+sudo chmod 755 /home/pi-star
+sudo chmod 755 $INSTALL_DIR
 
-# 2. 初始配置文件
-if [ ! -f /etc/mmdvm_push.json ]; then
-cat <<EOF > /etc/mmdvm_push.json
-{
-    "ui_lang": "cn",
-    "my_callsign": "N0CALL",
-    "min_duration": 3.0,
-    "quiet_mode": {"enabled": false, "start": "23:00", "end": "07:00"},
-    "push_tg_enabled": false,
-    "tg_token": "",
-    "tg_chat_id": "",
-    "push_wx_enabled": false,
-    "wx_token": "",
-    "ignore_list": [],
-    "focus_list": []
-}
-EOF
+echo "2. 初始化配置文件..."
+CONFIG_FILE="/etc/mmdvm_push.json"
+if [ ! -f "$CONFIG_FILE" ]; then
+    sudo echo '{"my_callsign":"NOCALL","min_duration":5.0,"ui_lang":"cn"}' > $CONFIG_FILE
 fi
+sudo chmod 666 $CONFIG_FILE
 
-# 3. 设置权限
-sudo chown www-data:www-data /etc/mmdvm_push.json
-sudo chmod 664 /etc/mmdvm_push.json
-sudo cp push_admin.php /var/www/dashboard/admin/
-sudo chown www-data:www-data /var/www/dashboard/admin/push_admin.php
+echo "3. 部署 Web 管理页面..."
+WEB_DIR="/var/www/dashboard/admin"
+sudo ln -sf $INSTALL_DIR/push_admin.php $WEB_DIR/push_admin.php
 
-# 4. 配置sudo免密 (关键步)
-if ! sudo grep -q "mmdvm_push.service" /etc/sudoers; then
-    echo "www-data ALL=(ALL) NOPASSWD: /bin/systemctl * mmdvm_push.service" | sudo tee -a /etc/sudoers
-fi
-
-# 5. 注册服务
-sudo cp mmdvm_push.service /etc/systemd/system/
+echo "4. 配置服务自启动..."
+SERVICE_FILE="/etc/systemd/system/mmdvm_push.service"
+sudo ln -sf $INSTALL_DIR/mmdvm_push.service $SERVICE_FILE
 sudo systemctl daemon-reload
 sudo systemctl enable mmdvm_push.service
-sudo systemctl restart mmdvm_push.service
 
-echo "Installation Complete! Please visit http://pi-star.local/admin/push_admin.php"
+echo "5. 设置脚本执行权限..."
+sudo chmod +x $INSTALL_DIR/mmdvm_push.py
+
+echo "安装完成！请访问 Pi-Star 仪表盘 /admin/push_admin.php 进行配置。"
+rpi-ro
