@@ -1,137 +1,114 @@
 
 ---
 
-# MMDVM-Telegram-WeChat-Notifier
+# MMDVM-Push-Notifier (v2.0)
 
-[中文版](https://www.google.com/search?q=%23%E4%B8%AD%E6%96%87%E7%89%88) | [English Version](https://www.google.com/search?q=%23english-version)
+**Real-time Activity Notifications for Pi-Star via Telegram & WeChat** **基于 Pi-Star 的 MMDVM 通联实时推送系统 (Telegram & 微信)**
 
 ---
 
-## 中文版
+## 📖 Introduction / 简介
 
-这是一个专为 **Pi-Star** 设计的轻量级通联推送工具。它能够实时监控 MMDVMHost 日志，并将通联记录以精美的格式推送至 **Telegram** 或 **微信 (PushPlus)**。
+**MMDVM-Push-Notifier** is a lightweight tool for Pi-Star users to receive real-time radio activity notifications. It features a built-in web management panel, allowing you to configure push services, filters, and quiet hours directly from your browser.
 
-### ✨ 主要功能
+**MMDVM-Push-Notifier** 是一款专为 Pi-Star 用户设计的轻量级通联推送工具。它集成了网页管理面板，您可以直接在浏览器中配置推送服务、过滤规则及静音时段。
 
-* **实时监控**：毫秒级解析日志，松开 PTT 即刻收到通知。
-* **双平台支持**：同时支持 Telegram Bot 和微信 PushPlus。
-* **集成界面**：提供 Pi-Star 风格的双语管理网页。
-* **零依赖**：Python 脚本采用原生库编写，无需安装任何第三方库。
-* **自动运行**：支持开机自启和后台崩溃自动重启。
+### ✨ Features / 功能特性
 
-### 🛠️ 安装步骤
+* **Web Admin Panel**: Manage everything at `http://pi-star.local/admin/push_admin.php`.
+* **Dual Channels**: Supports Telegram Bot and WeChat (via PushPlus).
+* **Smart Filtering**: Filter by callsign (Blacklist/Whitelist) and minimum duration.
+* **Quiet Mode**: Schedule "Do Not Disturb" hours (supports overnight range).
+* **Pi-Star Integrated**: Native Pi-Star CSS style and bilingual support (CN/EN).
+* **网页管理面板**: 在 `http://pi-star.local/admin/push_admin.php` 轻松配置。
+* **双通道推送**: 支持 Telegram 机器人及微信 (通过 PushPlus)。
+* **智能过滤**: 支持呼号黑白名单过滤，以及自定义最小通联时长过滤。
+* **静音模式**: 支持设置免打扰时段（支持跨天设置）。
+* **深度集成**: 采用 Pi-Star 原生样式，支持中英文双语切换。
 
-1. **获取代码**：
+---
+
+## 🛠️ Installation / 安装步骤
+
+### 1. Download / 下载
+
+Log in to your Pi-Star via SSH and run:
+
+登录 Pi-Star 的 SSH 终端并执行：
+
 ```bash
+rpi-rw
 cd /home/pi-star
-git clone https://github.com/你的用户名/MMDVM-Telegram-WeChat-Notifier.git
-cd MMDVM-Telegram-WeChat-Notifier
-chmod +x mmdvm_push.py
+git clone https://github.com/fnshiwu/MMDVM-Push-Notifier.git
+cd MMDVM-Push-Notifier
 
 ```
 
+### 2. Fast Install / 一键安装
 
-2. **部署 Web 管理界面**：
+Run the installer script to set permissions and register the service:
+
+运行安装脚本以自动设置权限并注册服务：
+
 ```bash
-sudo touch /etc/mmdvm_push.json
-sudo chmod 666 /etc/mmdvm_push.json
-sudo cp push_admin.php /var/www/dashboard/admin/
+sudo bash install.sh
 
 ```
-
-
-3. **权限授权**（执行 `sudo visudo`）：
-```text
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service, /bin/systemctl stop mmdvm_push.service, /bin/systemctl restart mmdvm_push.service, /bin/systemctl status mmdvm_push.service
-
-```
-
-
-4. **启动服务**：
-```bash
-sudo cp mmdvm_push.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable mmdvm_push.service
-sudo systemctl start mmdvm_push.service
-
-```
-
-
 
 ---
 
-## English Version
+## 🔑 Token Setup / 获取 Token
 
-A lightweight notification tool designed for **Pi-Star**. It monitors MMDVMHost logs in real-time and pushes QSO records to **Telegram** or **WeChat (PushPlus)** with a clean, formatted style.
+### Telegram
 
-### ✨ Key Features
+1. **Bot Token**: Message [@BotFather](https://t.me/botfather) on TG, send `/newbot`, and follow the steps to get your API Token.
+2. **Chat ID**: Message [@userinfobot](https://t.me/userinfobot) to get your numerical User ID.
+3. **设置**: 将获取的 Token 和 ID 填入管理页面。
 
-* **Real-time Monitoring**: Millisecond-level log parsing; get notified immediately after releasing PTT.
-* **Dual-Platform Support**: Supports both Telegram Bot and WeChat (via PushPlus).
-* **Integrated Web UI**: Bilingual management page designed with the Pi-Star dashboard style.
-* **Zero Dependencies**: Pure Python script using native libraries; no `pip` or `requests` required.
-* **Service Management**: Fully managed via Systemd for auto-start and crash recovery.
+### WeChat (PushPlus)
 
-### 🛠️ Installation
-
-1. **Clone the Repository**:
-```bash
-cd /home/pi-star
-git clone https://github.com/YourUsername/MMDVM-Telegram-WeChat-Notifier.git
-cd MMDVM-Telegram-WeChat-Notifier
-chmod +x mmdvm_push.py
-
-```
-
-
-2. **Deploy Web Management UI**:
-```bash
-sudo touch /etc/mmdvm_push.json
-sudo chmod 666 /etc/mmdvm_push.json
-sudo cp push_admin.php /var/www/dashboard/admin/
-
-```
-
-
-3. **Authorize Permissions** (via `sudo visudo`):
-```text
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service, /bin/systemctl stop mmdvm_push.service, /bin/systemctl restart mmdvm_push.service, /bin/systemctl status mmdvm_push.service
-
-```
-
-
-4. **Activate System Service**:
-```bash
-sudo cp mmdvm_push.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable mmdvm_push.service
-sudo systemctl start mmdvm_push.service
-
-```
-
-
+1. Visit [PushPlus Official](http://www.pushplus.plus/) and login via WeChat.
+2. Copy your **Token** from the "One-to-One Push" section.
+3. **设置**: 将 Token 填入管理页面并确保已关注 PushPlus 公众号。
 
 ---
 
-## 📝 Preview / 效果预览
+## 📖 Usage / 使用说明
 
-> ## **🎙️ Voice Transmission Ended / 话音通联结束**
-> 
-> 
-> 👤 **Callsign**: BG6DFN
-> 👥 **Target**: TG 46001
-> 📅 **Date**: 2026-01-05
-> ⏰ **Time**: 19:43:48
-> 📡 **Slot**: 1
-> ⏳ **Duration**: 24.0s
-
----
-
-## 🤝 Credits
-
-* Pi-Star Dashboard by MW0MWZ
-* Mod by **BA4SMQ**
+1. Open your browser: `http://pi-star.local/admin/push_admin.php`.
+2. Enter your **Callsign** and **Tokens**.
+3. Set **Min Duration** (e.g., 3.0s) to filter out short keying.
+4. Click **SAVE SETTINGS**, then click **RESTART** to apply.
+5. Use the **SEND TEST** button to verify the connection.
+6. 浏览器访问: `http://pi-star.local/admin/push_admin.php`。
+7. 输入您的 **呼号** 和 **Token**。
+8. 设置 **最小推送时长** (建议 3.0s) 以过滤误触。
+9. 点击 **SAVE SETTINGS** 保存，然后点击 **RESTART** 使其生效。
+10. 点击 **SEND TEST** 按钮验证推送是否正常。
 
 ---
 
-**还需要我针对 GitHub 上的具体文件描述提供建议，或者帮你把 Python 脚本里的输出日志也改成中英双语吗？**
+## 📂 File Structure / 文件说明
+
+* `mmdvm_push.py`: The core backend script monitoring logs. (后端核心脚本)
+* `push_admin.php`: Web-based management interface. (网页管理面板)
+* `install.sh`: Automated installation & permission script. (一键安装脚本)
+* `mmdvm_push.service`: Systemd service configuration. (系统服务配置)
+
+---
+
+## 🤝 Contributing & 73
+
+Contributions are welcome! If you have suggestions for new features, feel free to open an issue or pull request.
+
+欢迎提供建议或提交代码！
+
+**73! DE BA4SMQ**
+
+---
+
+### 💡 提示：
+
+我已经将您的 GitHub 地址正确嵌入。您只需将此内容保存为 `README.md` 放入仓库根目录，并将我之前提供的 `install.sh`、`mmdvm_push.py` 等文件一并上传即可。
+
+**还需要我为您提供如何将这些本地文件通过 Git 命令推送到 GitHub 仓库的步骤吗？**
