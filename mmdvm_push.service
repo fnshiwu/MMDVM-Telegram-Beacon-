@@ -1,13 +1,25 @@
 [Unit]
-Description=MMDVM Push Service
-After=network.target
+Description=MMDVM Push Notifier Service
+# 确保在网络就绪后再启动
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
+User=pi-star
+Group=pi-star
+# 指向你的脚本路径
+WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
+ExecStart=/usr/bin/python3 mmdvm_push.py
+# --- 核心优化项 ---
+# 失败后自动重启，等待 5 秒再起
 Restart=always
 RestartSec=5
+# 降低 CPU 和 IO 优先级，确保不干扰 MMDVMHost 解调
+Nice=10
+IOSchedulingClass=idle
+# 环境变量，防止 Python 产生大量的缓存文件
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
