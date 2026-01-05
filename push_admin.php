@@ -3,81 +3,50 @@ session_start();
 $configFile = '/etc/mmdvm_push.json';
 $serviceName = 'mmdvm_push.service';
 
+function set_disk($mode) { @shell_exec("sudo rpi-$mode"); }
+
 if (!file_exists($configFile)) {
-    shell_exec('sudo rpi-rw');
-    $initialConfig = [
-        "my_callsign" => "BA4SMQ",
-        "min_duration" => 5.0,
-        "quiet_mode" => ["enabled" => false, "start" => "23:00", "end" => "07:00"],
-        "push_tg_enabled" => false, "tg_token" => "", "tg_chat_id" => "",
-        "push_wx_enabled" => false, "wx_token" => "",
-        "ignore_list" => [], "focus_list" => [],
-        "ui_lang" => "cn"
-    ];
-    file_put_contents($configFile, json_encode($initialConfig, 192));
-    shell_exec('sudo rpi-ro');
+    set_disk('rw');
+    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn"], 192));
+    set_disk('ro');
 }
+
 $config = json_decode(file_get_contents($configFile), true);
 
-if (isset($_GET['set_lang'])) { 
-    shell_exec('sudo rpi-rw');
-    $_SESSION['pistar_push_lang'] = $_GET['set_lang']; 
-    $config['ui_lang'] = $_GET['set_lang'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
+    set_disk('rw');
+    if (isset($_GET['set_lang'])) {
+        $config['ui_lang'] = $_GET['set_lang'];
+        $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
+    } elseif ($_POST['action'] === 'save') {
+        $config = [
+            "my_callsign" => strtoupper(trim($_POST['callsign'])),
+            "min_duration" => floatval($_POST['min_duration']),
+            "quiet_mode" => ["enabled"=>isset($_POST['qm_en']), "start"=>$_POST['qm_start'], "end"=>$_POST['qm_end']],
+            "push_tg_enabled" => isset($_POST['tg_en']), "tg_token" => trim($_POST['tg_token']), "tg_chat_id" => trim($_POST['tg_chat_id']),
+            "push_wx_enabled" => isset($_POST['wx_en']), "wx_token" => trim($_POST['wx_token']),
+            "ignore_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['ignore_list'])))),
+            "focus_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['focus_list'])))),
+            "ui_lang" => $config['ui_lang']
+        ];
+        $alertMsg = ($config['ui_lang'] == 'cn') ? "设置已保存！" : "Settings Saved!";
+    }
     file_put_contents($configFile, json_encode($config, 192));
-    shell_exec('sudo rpi-ro');
+    set_disk('ro');
+    
+    $action = $_POST['action'];
+    if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo systemctl $action $serviceName");
+    if ($action === 'test') shell_exec("python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test > /dev/null 2>&1 &");
 }
-$current_lang = isset($_SESSION['pistar_push_lang']) ? $_SESSION['pistar_push_lang'] : ($config['ui_lang'] ?? 'cn');
+
+$current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
+$is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
 
 $lang = [
-    'cn' => [
-        'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置',
-        'srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止',
-        'btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置',
-        'conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)',
-        'qm_en'=>'开启静音时段','qm_range'=>'静音时间范围','tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','en'=>'启用推送',
-        'ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'
-    ],
-    'en' => [
-        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings',
-        'srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED',
-        'btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS',
-        'conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)',
-        'qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range','tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','en'=>'Enable',
-        'ign_list'=>'Ignore List','foc_list'=>'Focus List'
-    ]
+    'cn' => ['nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围','tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'],
+    'en' => ['nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range','tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List']
 ][$current_lang];
-
-$alertMsg = "";
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'];
-    if ($action === 'save') {
-        shell_exec('sudo rpi-rw');
-        $config['my_callsign'] = strtoupper(trim($_POST['callsign']));
-        $config['min_duration'] = floatval($_POST['min_duration']);
-        $config['quiet_mode']['enabled'] = isset($_POST['qm_en']);
-        $config['quiet_mode']['start'] = $_POST['qm_start'];
-        $config['quiet_mode']['end'] = $_POST['qm_end'];
-        $config['push_tg_enabled'] = isset($_POST['tg_en']);
-        $config['tg_token'] = trim($_POST['tg_token']);
-        $config['tg_chat_id'] = trim($_POST['tg_chat_id']);
-        $config['push_wx_enabled'] = isset($_POST['wx_en']);
-        $config['wx_token'] = trim($_POST['wx_token']);
-        $config['ignore_list'] = array_filter(array_map('trim', explode("\n", strtoupper($_POST['ignore_list']))));
-        $config['focus_list'] = array_filter(array_map('trim', explode("\n", strtoupper($_POST['focus_list']))));
-        file_put_contents($configFile, json_encode($config, 192));
-        shell_exec('sudo rpi-ro');
-        $alertMsg = $is_cn ? "设置已保存！" : "Settings Saved!";
-    }
-    if ($action === 'test') {
-        $test_msg = "🚀 MMDVM Push Test\nCall: " . $_POST['callsign'] . "\nTime: " . date("H:i:s");
-        if (isset($_POST['tg_en'])) @file_get_contents("https://api.telegram.org/bot".trim($_POST['tg_token'])."/sendMessage?".http_build_query(["chat_id"=>trim($_POST['tg_chat_id']), "text"=>$test_msg]));
-        if (isset($_POST['wx_en'])) @file_get_contents("http://www.pushplus.plus/send?".http_build_query(["token"=>trim($_POST['wx_token']), "title"=>"Test", "content"=>$test_msg]));
-        $alertMsg = $is_cn ? "测试已发出！" : "Test Sent!";
-    }
-    if (in_array($action, ['start', 'stop', 'restart'])) { shell_exec("sudo systemctl $action $serviceName"); }
-}
-$is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
 ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
