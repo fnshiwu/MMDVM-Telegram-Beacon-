@@ -106,9 +106,3 @@ Contributions are welcome! If you have suggestions for new features, feel free t
 **73! DE BA4SMQ**
 
 ---
-
-### 💡 提示：
-
-我已经将您的 GitHub 地址正确嵌入。您只需将此内容保存为 `README.md` 放入仓库根目录，并将我之前提供的 `install.sh`、`mmdvm_push.py` 等文件一并上传即可。
-
-**还需要我为您提供如何将这些本地文件通过 Git 命令推送到 GitHub 仓库的步骤吗？**
