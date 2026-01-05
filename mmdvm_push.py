@@ -1,137 +1,94 @@
-import os, time, json, glob, re, urllib.request, urllib.parse
+import os, time, json, glob, re, urllib.request, urllib.parse, sys
 from datetime import datetime
 from threading import Thread
 
-# --- 配置路径 ---
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
+_last_conf_time = 0
+_cached_config = {}
 
-# --- 1. 预编译正则表达式 (性能核心) ---
-RE_LINE_TYPE = re.compile(r'end of.*transmission')
+# --- 预编译正则 (保持原逻辑不变) ---
+RE_LINE_TYPE = re.compile(r'end of.*transmission', re.IGNORECASE)
 RE_CALL = re.compile(r'from\s+([A-Z0-9/]+)')
 RE_DUR = re.compile(r'(\d+\.?\d*)\s+seconds')
 RE_TARGET = re.compile(r'to\s+(TG\s*\d+|PC\s*\d+|\d+)')
 RE_TIME = re.compile(r'\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}')
 
-def load_config():
-    """安全加载配置"""
-    default_conf = {
-        "my_callsign": "N0CALL", "min_duration": 3.0,
-        "quiet_mode": {"enabled": False, "start": "23:00", "end": "07:00"},
-        "push_tg_enabled": False, "tg_token": "", "tg_chat_id": "",
-        "push_wx_enabled": False, "wx_token": "",
-        "ignore_list": [], "focus_list": []
-    }
+def get_config():
+    global _last_conf_time, _cached_config
     try:
-        if os.path.exists(CONFIG_FILE):
+        mtime = os.path.getmtime(CONFIG_FILE)
+        if mtime > _last_conf_time:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                default_conf.update(data)
+                _cached_config = json.load(f)
+            _last_conf_time = mtime
     except: pass
-    return default_conf
+    return _cached_config
 
 def async_post(url, data=None, is_json=False):
-    """异步任务：在子线程中处理网络请求，防止阻塞主循环"""
     def task():
         try:
-            if is_json:
-                req = urllib.request.Request(url, data=data, method='POST')
-                req.add_header('Content-Type', 'application/json')
-                urllib.request.urlopen(req, timeout=8)
-            else:
-                urllib.request.urlopen(url, timeout=8)
-        except: pass 
-    Thread(target=task).start()
+            req = urllib.request.Request(url, data=data, method='POST') if data else urllib.request.Request(url)
+            if is_json: req.add_header('Content-Type', 'application/json')
+            with urllib.request.urlopen(req, timeout=5) as r: pass 
+        except: pass
+    Thread(target=task, daemon=True).start()
 
-def send_msg(text, config, is_focus=False):
-    """构建推送任务"""
-    # Telegram
-    if config.get('push_tg_enabled') and config.get('tg_token'):
-        params = urllib.parse.urlencode({"chat_id": config.get('tg_chat_id'), "text": text, "parse_mode": "Markdown"})
-        url = f"https://api.telegram.org/bot{config.get('tg_token')}/sendMessage?{params}"
-        async_post(url)
-
-    # WeChat (PushPlus)
+def send_payload(config, type_label, body_text):
+    msg_header = "━━━━━━━━━━━━━━━\n"
     if config.get('push_wx_enabled') and config.get('wx_token'):
-        token = config.get('wx_token')
-        if len(token) > 10: # 简单校验
-            title = "🌟 Focus Call" if is_focus else "🎙️ MMDVM Activity"
-            post_data = json.dumps({
-                "token": token, "title": title, 
-                "content": text.replace("\n", "<br>"), "template": "html"
-            }).encode('utf-8')
-            async_post("http://www.pushplus.plus/send", data=post_data, is_json=True)
-
-def is_quiet_time(config):
-    qm = config.get('quiet_mode', {})
-    if not qm.get('enabled', False): return False
-    now = datetime.now().strftime("%H:%M")
-    s, e = qm.get('start', '23:00'), qm.get('end', '07:00')
-    return (now >= s or now <= e) if s > e else (s <= now <= e)
-
-def get_latest_log():
-    files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
-    return max(files, key=os.path.getmtime) if files else None
+        wx_body = body_text.replace("\n", "<br>").replace("**", "<b>").replace("**", "</b>")
+        d = json.dumps({"token": config['wx_token'], "title": f"{type_label}: {config.get('my_callsign','BA4SMQ')}", 
+                        "content": f"<b>{type_label}</b><br>{wx_body}", "template": "html"}).encode()
+        async_post("http://www.pushplus.plus/send", data=d, is_json=True)
+    
+    if config.get('push_tg_enabled') and config.get('tg_token'):
+        params = urllib.parse.urlencode({"chat_id": config['tg_chat_id'], 
+                                         "text": f"*{type_label}*\n{msg_header}{body_text}", "parse_mode": "Markdown"})
+        async_post(f"https://api.telegram.org/bot{config['tg_token']}/sendMessage?{params}")
 
 def monitor():
-    print("🚀 MMDVM Push Pro v2.2 (Async & Pre-compiled) Started.")
-    current_path = get_latest_log()
-    if not current_path: return
+    log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
+    if not log_files: return
+    current_log = max(log_files, key=os.path.getmtime)
+    f = open(current_log, "r", encoding="utf-8", errors="ignore")
+    f.seek(0, 2)
 
-    with open(current_path, "r", encoding="utf-8", errors="ignore") as f:
-        f.seek(0, 2)
-        while True:
-            line = f.readline()
-            if not line:
-                # 检查跨天日志切换
-                new_path = get_latest_log()
-                if new_path and new_path != current_path:
-                    current_path = new_path
-                    f = open(current_path, "r", encoding="utf-8", errors="ignore")
+    while True:
+        line = f.readline()
+        if not line:
+            if os.path.exists(current_log) and os.path.getsize(current_log) < f.tell():
+                new_log = max(glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log")), key=os.path.getmtime)
+                if new_log != current_log:
+                    f.close()
+                    current_log = new_log
+                    f = open(current_log, "r", encoding="utf-8", errors="ignore")
                     f.seek(0, 2)
-                time.sleep(0.4) # 稍微降低轮询频率，平衡性能
-                continue
-
-            # 使用预编译正则快速匹配
-            if RE_LINE_TYPE.search(line):
-                config = load_config()
-                try:
-                    call_match = RE_CALL.search(line)
-                    dur_match = RE_DUR.search(line)
-                    if not call_match or not dur_match: continue
-                    
-                    call = call_match.group(1).upper()
-                    dur = float(dur_match.group(1))
-                    
-                    # 过滤逻辑
-                    focus_list = config.get('focus_list', [])
-                    ignore_list = config.get('ignore_list', [])
-                    is_focus = call in focus_list
-                    
-                    if focus_list and not is_focus: continue
-                    if is_quiet_time(config) and not is_focus: continue
-                    if dur < config.get('min_duration', 3.0): continue
-                    if call == config.get('my_callsign') or call in ignore_list: continue
-
-                    # 提取其他信息
-                    tg_match = RE_TARGET.search(line)
-                    target = tg_match.group(1) if tg_match else "Unknown"
-                    slot = "Slot 1" if "Slot 1" in line else "Slot 2"
-                    
-                    # 时间转换
-                    t_match = RE_TIME.search(line)
-                    display_time = time.strftime("%H:%M:%S", time.localtime(time.mktime(time.strptime(t_match.group(), "%Y-%m-%d %H:%M:%S")))) if t_match else datetime.now().strftime("%H:%M:%S")
-
-                    # 构建消息
-                    msg = (f"*MMDVM Activity*\n---\n👤 **Call**: {call}\n👥 **Target**: {target}\n"
-                           f"⏳ **Dur**: {dur}s  |  📡 **{slot}**\n⏰ **Time**: {display_time}")
-
-                    # 发送 (异步)
-                    send_msg(msg, config, is_focus)
-                    print(f"[{display_time}] Pushed: {call} ({dur}s)")
-
-                except Exception as e:
-                    print(f"Parsing error: {e}")
+            time.sleep(0.5); continue
+        
+        if RE_LINE_TYPE.search(line):
+            conf = get_config()
+            try:
+                call = RE_CALL.search(line).group(1).upper()
+                dur = float(RE_DUR.search(line).group(1))
+                if dur < conf.get('min_duration', 1.0) or call == conf.get('my_callsign'): continue
+                
+                is_data = "data" in line.lower()
+                is_cn = conf.get('ui_lang', 'cn') == 'cn'
+                type_label = ("💾 数据通联" if is_data else "🎙️ 语音通联") if is_cn else ("💾 Data" if is_data else "🎙️ Voice")
+                labels = ["呼号", "群组", "日期", "时间", "时隙", "时长"] if is_cn else ["Callsign", "Group", "Date", "Time", "Slot", "Duration"]
+                
+                t_m = RE_TIME.search(line)
+                dt = t_m.group().split() if t_m else [datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")]
+                
+                body = (f"👤 **{labels[0]}**: {call}\n👥 **{labels[1]}**: {RE_TARGET.search(line).group(1) if RE_TARGET.search(line) else 'Unknown'}\n"
+                        f"📅 **{labels[2]}**: {dt[0]}\n⏰ **{labels[3]}**: {dt[1]}\n"
+                        f"📡 **{labels[4]}**: {'Slot 1' if 'Slot 1' in line else 'Slot 2'}\n⏳ **{labels[5]}**: {dur}{'秒' if is_cn else 's'}")
+                send_payload(conf, type_label, body)
+            except: pass
 
 if __name__ == "__main__":
-    monitor()
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        c = get_config()
+        send_payload(c, "🔔 测试推送", f"呼号: {c.get('my_callsign','BA4SMQ')}\n测试成功！")
+    else: monitor()
