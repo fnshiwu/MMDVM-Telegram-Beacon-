@@ -148,7 +148,7 @@ class MMDVMMonitor:
             
             print(f"[{datetime.now().strftime('%H:%M:%S')}] 匹配成功: {call} -> {target} ({dur}s)")
             
-            type_label = f"🎙️ 语音 ({slot})" if is_v else f"💾 数据 ({slot})"
+            type_label = f"🎙️ 语音通联 ({slot})" if is_v else f"💾 数据模式 ({slot})"
             body = (f"👤 **呼号**: {call}{info['name']}\n👥 **群组**: {target}\n📍 **地区**: {info['loc']}\n"
                     f"📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n⏳ **时长**: {dur}秒")
             
