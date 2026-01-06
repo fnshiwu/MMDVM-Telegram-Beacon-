@@ -1,14 +1,15 @@
 [Unit]
-Description=MMDVM Push Notifier Service
-After=mmdvmhost.service
+Description=MMDVM Log Push Notifier
+After=network.target
 
 [Service]
 Type=simple
-User=pi-star
-Group=pi-star
+User=root
+Group=root
+WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
 ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
