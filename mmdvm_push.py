@@ -156,7 +156,7 @@ class MMDVMMonitor:
             
             # --- 构造推送模板 ---
             # 保持基础信息的 Emoji，但丢包率和误码率只显示数值
-            type_label = f"🎙️ 语音通联 ({slot})" if is_v else f"💾 数据传输 ({slot})"
+            type_label = f"🎙️ 语音通联 ({slot})" if is_v else f"💾 数据模式 ({slot})"
             body = (f"👤 **呼号**: {call}{info['name']}\n"
                     f"👥 **群组**: {target}\n"
                     f"📍 **地区**: {info['loc']}\n"
