@@ -26,6 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "quiet_mode" => ["enabled"=>isset($_POST['qm_en']), "start"=>$_POST['qm_start'], "end"=>$_POST['qm_end']],
             "push_tg_enabled" => isset($_POST['tg_en']), "tg_token" => trim($_POST['tg_token']), "tg_chat_id" => trim($_POST['tg_chat_id']),
             "push_wx_enabled" => isset($_POST['wx_en']), "wx_token" => trim($_POST['wx_token']),
+            // 新增飞书保存逻辑
+            "push_fs_enabled" => isset($_POST['fs_en']), "fs_webhook" => trim($_POST['fs_webhook']), "fs_secret" => trim($_POST['fs_secret']),
             "ignore_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['ignore_list'])))),
             "focus_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['focus_list'])))),
             "ui_lang" => $config['ui_lang']
@@ -41,9 +43,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     if ($action === 'test') {
         $out = [];
         $res = 0;
-        // 关键点：2>&1 确保错误信息也能被捕获
+        // 使用完整的系统路径调用 python3
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
-        $msg = implode(" ", $out);
+        $msg = $out[0] ?? "No feedback";
         $alertMsg = ($config['ui_lang'] == 'cn') ? "测试反馈: $msg" : "Test Feedback: $msg";
     }
 }
@@ -53,8 +55,8 @@ $is_cn = ($current_lang === 'cn');
 $is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
 
 $lang = [
-    'cn' => ['nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围','tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'],
-    'en' => ['nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range','tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List']
+    'cn' => ['nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围','tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'],
+    'en' => ['nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range','tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List']
 ][$current_lang];
 ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -110,6 +112,12 @@ $lang = [
             <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
             <tr><td align="right"><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td align="right">Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token'];?>" /></td></tr>
+            
+            <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
+            <tr><td align="right"><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td align="right">Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" placeholder="https://open.feishu.cn/..." /></td></tr>
+            <tr><td align="right">Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
+
             <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
             <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['ignore_list']??[]);?></textarea></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
