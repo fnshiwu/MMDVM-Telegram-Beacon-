@@ -97,6 +97,29 @@ sudo bash install.sh
 
 ---
 
+## 卸载步骤
+
+# 1. 切换到可读写模式
+rpi-rw
+
+# 2. 停止并禁用旧服务
+sudo systemctl stop mmdvm_push.service
+sudo systemctl disable mmdvm_push.service
+
+# 3. 删除服务文件
+sudo rm -f /etc/systemd/system/mmdvm_push.service
+sudo systemctl daemon-reload
+
+# 4. 删除 Web 页面链接
+sudo rm -f /var/www/dashboard/admin/push_admin.php
+
+# 5. 删除旧的项目文件夹 
+sudo rm -rf /home/pi-star/MMDVM-Push-Notifier
+
+# 6. (可选) 如果想完全重置配置，可以删除 JSON 配置文件
+# 如果想保留之前的 Token 方便测试，可以跳过这一步
+# sudo rm -f /etc/mmdvm_push.json
+
 ## 🤝 Contributing & 73
 
 Contributions are welcome! If you have suggestions for new features, feel free to open an issue or pull request.
