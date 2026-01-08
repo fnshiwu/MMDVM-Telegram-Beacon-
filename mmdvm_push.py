@@ -1,4 +1,4 @@
-import os, time, json, glob, re, urllib.request, urllib.parse, sys, base64, hmac, hashlib, mmap
+import os, time, json, glob, re, urllib.request, urllib.parse, sys, base64, hmac, hashlib, mmap, subprocess
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -32,8 +32,6 @@ class ConfigManager:
         return cls._config
 
 class HamInfoManager:
-    """呼号信息检索：仅增加中英判定与指定国旗映射"""
-    
     def __init__(self, id_file):
         self.id_file = id_file
         self._io_lock = Semaphore(4)
@@ -52,8 +50,6 @@ class HamInfoManager:
                         end = mm.find(b'\n', idx)
                         if end == -1: end = len(mm)
                         raw_line = mm[start:end]
-                        
-                        # 【修改点1】增加自动判定编码 (UTF-8 与 GB18030)
                         try:
                             line = raw_line.decode('utf-8')
                         except UnicodeDecodeError:
@@ -66,9 +62,7 @@ class HamInfoManager:
                         state = parts[5].strip().upper() if len(parts) > 5 else ""
                         country = parts[6].strip() if len(parts) > 6 else ""
 
-                        # 【修改点2】添加指定的全球中英文国旗映射表
                         geo_map = {
-                            # 亚洲 (Asia)
                             "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", "Taiwan": "🇹🇼 中国台湾",
                             "Japan": "🇯🇵 日本", "Korea": "🇰🇷 韩国", "South Korea": "🇰🇷 韩国", "North Korea": "🇰🇵 朝鲜",
                             "Thailand": "🇹🇭 泰国", "Singapore": "🇸🇬 新加坡", "Malaysia": "🇲🇾 马来西亚", "Indonesia": "🇮🇩 印度尼西亚",
@@ -78,7 +72,6 @@ class HamInfoManager:
                             "Turkey": "🇹🇷 土耳其", "Iran": "🇮🇷 伊朗", "Iraq": "🇮🇶 伊拉克", "Kuwait": "🇰🇼 科威特",
                             "Oman": "🇴🇲 阿曼", "Qatar": "🇶🇦 卡塔尔", "Jordan": "🇯🇴 约旦", "Lebanon": "🇱🇧 黎巴嫩",
                             "Kazakhstan": "🇰🇿 哈萨克斯坦", "Uzbekistan": "🇺🇿 乌兹别克斯坦",
-                            # 欧洲 (Europe)
                             "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "England": "🇬🇧 英国", "Germany": "🇩🇪 德国",
                             "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵🇹 葡萄牙",
                             "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", "Netherlands": "🇳🇱 荷兰",
@@ -89,31 +82,24 @@ class HamInfoManager:
                             "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 克罗地亚", "Serbia": "🇷🇸 塞尔维亚", "Slovenia": "🇸🇮 斯洛文尼亚",
                             "Estonia": "🇪🇪 爱沙尼亚", "Latvia": "🇱🇻 拉脱维亚", "Lithuania": "🇱🇹 立陶宛", "Iceland": "🇮🇸 冰岛",
                             "Luxembourg": "🇱🇺 卢森堡", "Monaco": "🇲🇨 摩纳哥", "Cyprus": "🇨🇾 塞浦路斯", "Malta": "🇲🇹 马耳他",
-                            # 北美洲 (North America)
                             "United States": "🇺🇸 美国", "USA": "🇺🇸 美国", "Canada": "🇨🇦 加拿大", "Mexico": "🇲🇽 墨西哥",
                             "Cuba": "🇨🇺 古巴", "Jamaica": "🇯🇲 牙买加", "Puerto Rico": "🇵🇷 波多黎各", "Dominican Republic": "🇩🇴 多米尼加",
                             "Costa Rica": "🇨🇷 哥斯达黎加", "Panama": "🇵🇦 巴拿马", "Guatemala": "🇬🇹 危地马拉", "Honduras": "🇭🇳 洪都拉斯",
-                            # 南美洲 (South America)
                             "Brazil": "🇧🇷 巴西", "Argentina": "🇦🇷 阿根廷", "Chile": "🇨🇱 智利", "Colombia": "🇨🇴 哥伦比亚",
                             "Peru": "🇵🇪 秘鲁", "Venezuela": "🇻🇪 委内瑞拉", "Uruguay": "🇺🇾 乌拉圭", "Paraguay": "🇵🇾 巴拉圭",
                             "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
-                            # 大洋洲 (Oceania)
                             "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
-                            # 非洲 (Africa)
                             "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", "Kenya": "🇰🇪 肯尼亚",
                             "Morocco": "🇲🇦 摩洛哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
                             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", "Seychelles": "🇸🇨 塞舌尔"
                         }
 
-                        # 【修改点3】判定逻辑：如果是中文库，匹配中文并显示国旗；如果是英文库，根据映射表显示
                         if any('\u4e00' <= char <= '\u9fff' for char in country):
-                            # 中文库处理逻辑：找到对应中文名所在的映射项，加上国旗
                             for k, v in geo_map.items():
                                 if k in country or (len(v.split()) > 1 and v.split()[1] in country):
                                     country = v
                                     break
                         else:
-                            # 英文库处理逻辑：直接映射
                             country = geo_map.get(country, country)
                         
                         full_name = f"{first_name} {last_name}".strip().upper()
@@ -139,7 +125,7 @@ class PushService:
             fs_payload = {
                 "msg_type": "interactive", 
                 "card": {
-                    "header": {"title": {"tag": "plain_text", "content": type_label}, "template": "blue" if is_voice else "green"}, 
+                    "header": {"title": {"tag": "plain_text", "content": type_label}, "template": "blue" if is_voice else "orange" if "上线" in type_label else "green"}, 
                     "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]
                 }
             }
@@ -168,6 +154,8 @@ class PushService:
 class MMDVMMonitor:
     def __init__(self):
         self.last_msg = {"call": "", "ts": 0}
+        self.last_temp_alert_time = 0
+        self.last_temp_check_time = 0
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
         self.re_master = re.compile(
             r'end of (?P<v_type>(?:voice )?|data )transmission from '
@@ -177,8 +165,63 @@ class MMDVMMonitor:
             r'BER: (?P<ber>\d+\.?\d*)%', re.IGNORECASE
         )
 
+    def get_sys_info(self):
+        """获取系统状态：IP, CPU, 内存"""
+        try:
+            ip = subprocess.getoutput("hostname -I").split()[0]
+            cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'")
+            mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'")
+            return ip, cpu, mem
+        except:
+            return "Unknown", "0", "0"
+
+    def get_current_temp(self, conf):
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp_c = float(f.read()) / 1000.0
+            unit = conf.get('temp_unit', 'C')
+            if unit == 'F':
+                val = (temp_c * 9/5) + 32
+                return f"{val:.1f}°F", val
+            return f"{temp_c:.1f}°C", temp_c
+        except:
+            return "N/A", 0.0
+
+    def check_temp_alert(self, conf):
+        if not conf.get('temp_alert_enabled'): return
+        now = time.time()
+        if now - self.last_temp_check_time < 60: return
+        self.last_temp_check_time = now
+        display_str, current_val = self.get_current_temp(conf)
+        threshold = float(conf.get('temp_threshold', 65.0))
+        if current_val >= threshold:
+            interval_sec = int(conf.get('temp_interval', 30)) * 60
+            if now - self.last_temp_alert_time > interval_sec:
+                self.last_temp_alert_time = now
+                alert_body = (f"🚨 **硬件高温预警**\n"
+                              f"🔥 **当前温度**: {display_str}\n"
+                              f"⚠️ **预警阈值**: {threshold:.1f}{conf.get('temp_unit','C')}\n"
+                              f"⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}\n"
+                              f"ℹ️ **说明**: 盒子温度过高，请注意通风散热。")
+                PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
+
+    def send_boot_notification(self, conf):
+        """发送设备上线通知"""
+        if not conf.get('boot_push_enabled', True): return
+        ip, cpu, mem = self.get_sys_info()
+        temp_str, _ = self.get_current_temp(conf)
+        body = (f"🚀 **设备已上线**\n"
+                f"🌐 **内网IP**: {ip}\n"
+                f"🌡️ **系统温度**: {temp_str}\n"
+                f"📊 **CPU占用**: {cpu}%\n"
+                f"💾 **内存占用**: {mem}\n"
+                f"⏰ **上线时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
+
     def run(self):
-        print(f"MMDVM 监控启动...")
+        conf = ConfigManager.get_config()
+        self.send_boot_notification(conf) # 启动时发送上线通知
+        print(f"MMDVM 监控启动：设备上线通知、温度显示与预警已就绪")
         while True:
             try:
                 log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
@@ -198,6 +241,8 @@ class MMDVMMonitor:
         if not match: return
         
         conf = ConfigManager.get_config()
+        self.check_temp_alert(conf)
+        
         call = match.group('call').upper()
         dur = float(match.group('dur'))
         loss, ber = match.group('loss'), match.group('ber')
@@ -211,6 +256,7 @@ class MMDVMMonitor:
         info = self.ham_manager.get_info(call)
         slot = "Slot 1" if "Slot 1" in line else "Slot 2"
         is_v = 'data' not in match.group('v_type').lower()
+        temp_str, _ = self.get_current_temp(conf)
 
         type_label = f"🎙️ 语音通联 ({slot})" if is_v else f"💾 数据模式 ({slot})"
         body = (f"👤 **呼号**: {call}{info['name']}\n"
@@ -220,7 +266,8 @@ class MMDVMMonitor:
                 f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n"
                 f"⏳ **时长**: {dur}秒\n"
                 f"📦 **丢失**: {loss}%\n"
-                f"📉 **误码**: {ber}%")
+                f"📉 **误码**: {ber}%\n"
+                f"🌡️ **温度**: {temp_str}")
         
         PushService.send(conf, type_label, body, is_voice=is_v)
 
