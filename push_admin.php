@@ -19,7 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
-    } elseif ($_POST['action'] === 'save') {
+    } elseif ($_POST['action'] === 'save' || $_POST['action'] === 'test') {
+        // 保存与测试前，先提取页面上的最新配置
         $config = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
             "min_duration" => floatval($_POST['min_duration']),
@@ -36,19 +37,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "focus_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['focus_list'])))),
             "ui_lang" => $config['ui_lang']
         ];
-        $alertMsg = ($config['ui_lang'] == 'cn') ? "设置已保存！" : "Settings Saved!";
+        file_put_contents($configFile, json_encode($config, 192));
+        
+        if ($_POST['action'] === 'save') {
+            $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
+        }
     }
-    file_put_contents($configFile, json_encode($config, 192));
     set_disk('ro');
     
     $action = $_POST['action'] ?? '';
     if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo systemctl $action $serviceName");
     
     if ($action === 'test') {
+        // 同步捕获 Python 测试结果
         $out = []; $res = 0;
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
-        $msg = $out[0] ?? "No feedback";
-        $alertMsg = ($config['ui_lang'] == 'cn') ? "测试反馈: $msg" : "Test Feedback: $msg";
+        $msg = "No feedback";
+        foreach ($out as $line) {
+            if (strpos($line, 'Success') !== false) { $msg = "Success"; break; }
+            if (strpos($line, 'Error') !== false || strpos($line, 'Exception') !== false) { $msg = $line; break; }
+        }
+        
+        // 成功显示对勾，失败显示红叉
+        if ($msg === "Success") {
+            $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success";
+        } else {
+            $alertMsg = ($config['ui_lang'] == 'cn') ? "❌ 测试反馈: $msg" : "❌ Test Feedback: $msg";
+        }
     }
 }
 
@@ -77,28 +92,16 @@ $lang = [
     <link rel="stylesheet" type="text/css" href="css/pistar-css.php" />
     <title>Push Notifier Settings</title>
     <style type="text/css">
-        /* 基础样式定义 */
         textarea { width: 95%; height: 55px; font-family: monospace; font-size: 12px; }
         input[type="text"], input[type="password"] { width: 95%; height: 22px; }
         input[type="number"], input[type="time"] { height: 22px; }
         select { height: 24px; vertical-align: middle; }
-        
-        /* 紧凑型输入框 */
         .time-box { width: 80px !important; }
         .num-box { width: 60px !important; }
         .btn-test { background: #b55; color: white; font-weight: bold; border: 1px solid #000; cursor: pointer; }
         
-        /* 核心布局：表格两列全部靠左对齐 */
-        table.settings td:first-child { 
-            font-weight: bold; 
-            text-align: left !important; 
-            padding-left: 10px; 
-            width: 35%;
-        }
-        table.settings td:last-child {
-            text-align: left !important;
-            padding-left: 10px;
-        }
+        table.settings td:first-child { font-weight: bold; text-align: left !important; padding-left: 10px; width: 35%; }
+        table.settings td:last-child { text-align: left !important; padding-left: 10px; }
     </style>
 </head>
 <body>
@@ -167,9 +170,10 @@ $lang = [
             <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['ignore_list']??[]);?></textarea></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
             <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['focus_list']??[]);?></textarea></td></tr>
-            <tr><td colspan="2" align="center" style="padding: 15px;">
-                <button type="submit" name="action" value="save" style="width:120px; height:32px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
-                <button type="submit" name="action" value="test" class="btn-test" style="width:120px; height:32px;"><?php echo $lang['btn_test']; ?></button>
+            
+            <tr><td colspan="2" style="text-align: center !important; padding: 25px 0;">
+                <button type="submit" name="action" value="save" style="width:130px; height:34px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
+                <button type="submit" name="action" value="test" class="btn-test" style="width:130px; height:34px; margin-left: 30px;"><?php echo $lang['btn_test']; ?></button>
             </td></tr>
         </table></form>
     </div>
