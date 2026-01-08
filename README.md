@@ -1,7 +1,7 @@
 
 ---
 
-# MMDVM-Push-Notifier (v2.95.1)
+# MMDVM-Push-Notifier (v2.98)
 
 **Real-time Activity Notifications for Pi-Star via Telegram & WeChat** **基于 Pi-Star 的 MMDVM 通联实时推送系统 (Telegram & 微信 & 飞书)**
 
@@ -25,7 +25,9 @@
 * **智能过滤**: 支持呼号黑白名单过滤，以及自定义最小通联时长过滤。
 * **静音模式**: 支持设置免打扰时段（支持跨天设置）。
 * **深度集成**: 采用 Pi-Star 原生样式，支持中英文双语切换。
-
+* **实时温度**: 实时温度显示。
+* **MMDVM启动**: 设备上线提示包括IP,温度，内存，CPU占用。
+* **高温预警**: 设备高温预警，提醒通风降温。
 ---
 
 ## 🛠️ Installation / 安装步骤
