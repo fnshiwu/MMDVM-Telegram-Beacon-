@@ -1,112 +1,71 @@
 <?php
 session_start();
-// 配置文件路径与服务名称
 $configFile = '/etc/mmdvm_push.json';
 $serviceName = 'mmdvm_push.service';
 $scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
 
-// 磁盘读写控制函数
 function set_disk($mode) { @shell_exec("sudo rpi-$mode"); }
 
-// 初始化配置文件
 if (!file_exists($configFile)) {
     set_disk('rw');
-    $initialConfig = [
-        "my_callsign" => "BA4SMQ",
-        "min_duration" => 5.0,
-        "ui_lang" => "cn",
-        "temp_unit" => "C",
-        "temp_threshold" => 65.0,
-        "temp_interval" => 30,
-        "boot_push_enabled" => true,
-        "temp_alert_enabled" => true
-    ];
-    file_put_contents($configFile, json_encode($initialConfig, 192));
+    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn"], 192));
     set_disk('ro');
 }
 
 $config = json_decode(file_get_contents($configFile), true);
 
-// 处理 POST 请求（保存设置或控制服务）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     set_disk('rw');
-    
-    // 语言切换逻辑
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
-    } 
-    // 保存设置逻辑
-    elseif (isset($_POST['action']) && $_POST['action'] === 'save') {
+    } elseif ($_POST['action'] === 'save') {
         $config = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
             "min_duration" => floatval($_POST['min_duration']),
-            "quiet_mode" => [
-                "enabled" => isset($_POST['qm_en']),
-                "start" => $_POST['qm_start'],
-                "end" => $_POST['qm_end']
-            ],
-            "push_tg_enabled" => isset($_POST['tg_en']),
-            "tg_token" => trim($_POST['tg_token']),
-            "tg_chat_id" => trim($_POST['tg_chat_id']),
-            "push_wx_enabled" => isset($_POST['wx_en']),
-            "wx_token" => trim($_POST['wx_token']),
-            "push_fs_enabled" => isset($_POST['fs_en']),
-            "fs_webhook" => trim($_POST['fs_webhook']),
-            "fs_secret" => trim($_POST['fs_secret']),
-            // --- 新增硬件监控字段 ---
-            "temp_alert_enabled" => isset($_POST['temp_alert_enabled']),
-            "boot_push_enabled" => isset($_POST['boot_push_enabled']),
-            "temp_threshold" => floatval($_POST['temp_threshold'] ?? 65.0),
-            "temp_interval" => intval($_POST['temp_interval'] ?? 30),
+            "quiet_mode" => ["enabled"=>isset($_POST['qm_en']), "start"=>$_POST['qm_start'], "end"=>$_POST['qm_end']],
+            "boot_push_enabled" => isset($_POST['boot_en']),
+            "temp_alert_enabled" => isset($_POST['temp_en']),
+            "temp_threshold" => floatval($_POST['temp_th']),
+            "temp_interval" => intval($_POST['temp_int']),
             "temp_unit" => $_POST['temp_unit'] ?? 'C',
-            // -----------------------
+            "push_tg_enabled" => isset($_POST['tg_en']), "tg_token" => trim($_POST['tg_token']), "tg_chat_id" => trim($_POST['tg_chat_id']),
+            "push_wx_enabled" => isset($_POST['wx_en']), "wx_token" => trim($_POST['wx_token']),
+            "push_fs_enabled" => isset($_POST['fs_en']), "fs_webhook" => trim($_POST['fs_webhook']), "fs_secret" => trim($_POST['fs_secret']),
             "ignore_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['ignore_list'])))),
             "focus_list" => array_filter(array_map('trim', explode("\n", strtoupper($_POST['focus_list'])))),
             "ui_lang" => $config['ui_lang']
         ];
         $alertMsg = ($config['ui_lang'] == 'cn') ? "设置已保存！" : "Settings Saved!";
     }
-    
     file_put_contents($configFile, json_encode($config, 192));
     set_disk('ro');
     
-    // 服务控制逻辑
-    if (isset($_POST['action'])) {
-        $action = $_POST['action'];
-        if (in_array($action, ['start', 'stop', 'restart'])) {
-            shell_exec("sudo systemctl $action $serviceName");
-        }
-        if ($action === 'test') {
-            $out = []; $res = 0;
-            exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
-            $msg = $out[0] ?? "No feedback";
-            $alertMsg = ($config['ui_lang'] == 'cn') ? "测试反馈: $msg" : "Test Feedback: $msg";
-        }
+    $action = $_POST['action'] ?? '';
+    if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo systemctl $action $serviceName");
+    
+    if ($action === 'test') {
+        $out = []; $res = 0;
+        exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
+        $msg = $out[0] ?? "No feedback";
+        $alertMsg = ($config['ui_lang'] == 'cn') ? "测试反馈: $msg" : "Test Feedback: $msg";
     }
 }
 
-// 界面显示逻辑
 $current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
 $is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
 
 $lang = [
     'cn' => [
-        'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置',
-        'srv_ctrl'=>'服务控制','status'=>'当前状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置',
-        'conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小时长 (秒)','qm_en'=>'静音模式','qm_range'=>'静音时段',
-        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置',
-        'temp_set'=>'硬件监控与系统通知','temp_en'=>'开启高温预警','boot_en'=>'开启设备上线通知','temp_thr'=>'报警阈值','temp_int'=>'重复报警间隔 (分)','temp_unit'=>'温度单位',
-        'en_push'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'
+        'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围',
+        'boot_set'=>'启动通知','temp_set'=>'高温预警','en_boot'=>'开启启动推送','en_temp'=>'开启高温预警','th_temp'=>'预警阈值','int_temp'=>'预警间隔 (分)',
+        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'
     ],
     'en' => [
-        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings',
-        'srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS',
-        'conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (s)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time',
-        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat Settings','fs_set'=>'Feishu Settings',
-        'temp_set'=>'Hardware & System Monitor','temp_en'=>'Temp Alert','boot_en'=>'Boot Notification','temp_thr'=>'Threshold','temp_int'=>'Alert Interval (min)','temp_unit'=>'Unit',
-        'en_push'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List'
+        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range',
+        'boot_set'=>'Boot Notice','temp_set'=>'Temp Alert','en_boot'=>'Enable Boot Push','en_temp'=>'Enable Temp Alert','th_temp'=>'Threshold','int_temp'=>'Interval (min)',
+        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List'
     ]
 ][$current_lang];
 ?>
@@ -116,13 +75,30 @@ $lang = [
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" type="text/css" href="css/pistar-css.php" />
-    <title>Pi-Star Push Notifier Settings</title>
+    <title>Push Notifier Settings</title>
     <style type="text/css">
-        textarea { width: 95%; height: 60px; font-family: monospace; font-size: 12px; }
-        input[type="text"], input[type="password"], input[type="number"], input[type="time"] { width: 95%; height: 24px; }
-        .time-box { width: 44% !important; display: inline-block; }
+        /* 基础样式定义 */
+        textarea { width: 95%; height: 55px; font-family: monospace; font-size: 12px; }
+        input[type="text"], input[type="password"] { width: 95%; height: 22px; }
+        input[type="number"], input[type="time"] { height: 22px; }
+        select { height: 24px; vertical-align: middle; }
+        
+        /* 紧凑型输入框 */
+        .time-box { width: 80px !important; }
+        .num-box { width: 60px !important; }
         .btn-test { background: #b55; color: white; font-weight: bold; border: 1px solid #000; cursor: pointer; }
-        select { width: 95%; height: 28px; }
+        
+        /* 核心布局：表格两列全部靠左对齐 */
+        table.settings td:first-child { 
+            font-weight: bold; 
+            text-align: left !important; 
+            padding-left: 10px; 
+            width: 35%;
+        }
+        table.settings td:last-child {
+            text-align: left !important;
+            padding-left: 10px;
+        }
     </style>
 </head>
 <body>
@@ -138,81 +114,65 @@ $lang = [
             <a href="?set_lang=<?php echo $is_cn?'en':'cn';?>" style="color: #ffff00;">[<?php echo $is_cn?'English':'中文';?>]</a>
         </p>
     </div>
-
     <div class="contentwide">
-        <?php if(isset($alertMsg)) echo "<div style='background:#ffffc0; color:#000; padding:8px; text-align:center; border:1px solid #666; margin-bottom:10px;'><b>$alertMsg</b></div>"; ?>
-        
+        <?php if(isset($alertMsg)) echo "<div style='background:#ffffc0; color:#000; padding:5px; text-align:center; border:1px solid #666;'><b>$alertMsg</b></div>"; ?>
         <form method="post">
         <table class="settings">
             <thead><tr><th colspan="2"><?php echo $lang['srv_ctrl']; ?></th></tr></thead>
-            <tr>
-                <td align="right" width="35%"><?php echo $lang['status']; ?>:</td>
-                <td><b style="color:<?php echo $is_running?'#008000':'#ff0000';?>"><?php echo $is_running ? $lang['run'] : $lang['stop']; ?></b></td>
-            </tr>
-            <tr>
-                <td align="right">操作:</td>
-                <td>
-                    <button type="submit" name="action" value="start"><?php echo $lang['btn_start']; ?></button>
-                    <button type="submit" name="action" value="stop"><?php echo $lang['btn_stop']; ?></button>
-                    <button type="submit" name="action" value="restart"><?php echo $lang['btn_res']; ?></button>
-                </td>
-            </tr>
-
+            <tr><td><?php echo $lang['status']; ?>:</td><td><b style="color:<?php echo $is_running?'#008000':'#ff0000';?>"><?php echo $is_running ? $lang['run'] : $lang['stop']; ?></b></td></tr>
+            <tr><td>Action:</td><td>
+                <button type="submit" name="action" value="start"><?php echo $lang['btn_start']; ?></button>
+                <button type="submit" name="action" value="stop"><?php echo $lang['btn_stop']; ?></button>
+                <button type="submit" name="action" value="restart"><?php echo $lang['btn_res']; ?></button>
+            </td></tr>
+            
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
-            <tr><td align="right"><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
-            <tr><td align="right"><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" value="<?php echo $config['min_duration'];?>" /></td></tr>
-            <tr><td align="right"><?php echo $lang['qm_en']; ?>:</td><td><input type="checkbox" name="qm_en" <?php echo ($config['quiet_mode']['enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td align="right"><?php echo $lang['qm_range']; ?>:</td><td>
+            <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
+            <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration'];?>" /></td></tr>
+            <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type="checkbox" name="qm_en" <?php echo ($config['quiet_mode']['enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td><?php echo $lang['qm_range']; ?>:</td><td>
                 <input type="time" name="qm_start" class="time-box" value="<?php echo $config['quiet_mode']['start']??'23:00';?>" /> - 
                 <input type="time" name="qm_end" class="time-box" value="<?php echo $config['quiet_mode']['end']??'07:00';?>" />
             </td></tr>
 
+            <thead><tr><th colspan="2"><?php echo $lang['boot_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en_boot']; ?>:</td><td><input type="checkbox" name="boot_en" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
+            
             <thead><tr><th colspan="2"><?php echo $lang['temp_set']; ?></th></tr></thead>
-            <tr><td align="right"><?php echo $lang['temp_en']; ?>:</td><td><input type="checkbox" name="temp_alert_enabled" <?php echo ($config['temp_alert_enabled']??true)?'checked':'';?> /></td></tr>
-            <tr><td align="right"><?php echo $lang['boot_en']; ?>:</td><td><input type="checkbox" name="boot_push_enabled" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
-            <tr><td align="right"><?php echo $lang['temp_thr']; ?>:</td><td><input type="number" step="0.1" name="temp_threshold" value="<?php echo $config['temp_threshold']??65.0;?>" /></td></tr>
-            <tr><td align="right"><?php echo $lang['temp_int']; ?>:</td><td><input type="number" name="temp_interval" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
-            <tr><td align="right"><?php echo $lang['temp_unit']; ?>:</td><td>
+            <tr><td><?php echo $lang['en_temp']; ?>:</td><td><input type="checkbox" name="temp_en" <?php echo ($config['temp_alert_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td><?php echo $lang['th_temp']; ?>:</td><td>
+                <input type="number" step="0.1" name="temp_th" class="num-box" value="<?php echo $config['temp_threshold']??65.0;?>" />
                 <select name="temp_unit">
-                    <option value="C" <?php echo ($config['temp_unit']??'C')=='C'?'selected':'';?>>摄氏度 Celsius (°C)</option>
-                    <option value="F" <?php echo ($config['temp_unit']??'C')=='F'?'selected':'';?>>华氏度 Fahrenheit (°F)</option>
+                    <option value="C" <?php echo ($config['temp_unit']??'C')=='C'?'selected':'';?>>°C</option>
+                    <option value="F" <?php echo ($config['temp_unit']??'C')=='F'?'selected':'';?>>°F</option>
                 </select>
             </td></tr>
+            <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
 
             <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
-            <tr><td align="right"><?php echo $lang['en_push']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td align="right">Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token'];?>" /></td></tr>
-            <tr><td align="right">Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id'];?>" /></td></tr>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token']??'';?>" /></td></tr>
+            <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id']??'';?>" /></td></tr>
             
             <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
-            <tr><td align="right"><?php echo $lang['en_push']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td align="right">Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token'];?>" /></td></tr>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token']??'';?>" /></td></tr>
             
             <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
-            <tr><td align="right"><?php echo $lang['en_push']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td align="right">Webhook URL:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
-            <tr><td align="right">Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
+            <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
 
             <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="Callsigns per line"><?php echo implode("\n", $config['ignore_list']??[]);?></textarea></td></tr>
-            
+            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['ignore_list']??[]);?></textarea></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="Callsigns per line"><?php echo implode("\n", $config['focus_list']??[]);?></textarea></td></tr>
-
-            <tr>
-                <td colspan="2" align="center" style="padding: 20px;">
-                    <button type="submit" name="action" value="save" style="width:140px; height:35px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
-                    &nbsp;&nbsp;
-                    <button type="submit" name="action" value="test" class="btn-test" style="width:140px; height:35px;"><?php echo $lang['btn_test']; ?></button>
-                </td>
-            </tr>
-        </table>
-        </form>
+            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['focus_list']??[]);?></textarea></td></tr>
+            <tr><td colspan="2" align="center" style="padding: 15px;">
+                <button type="submit" name="action" value="save" style="width:120px; height:32px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
+                <button type="submit" name="action" value="test" class="btn-test" style="width:120px; height:32px;"><?php echo $lang['btn_test']; ?></button>
+            </td></tr>
+        </table></form>
     </div>
-
-    <div class="footer">
-        Pi-Star / Pi-Star Dashboard, Mod by BA4SMQ.
-    </div>
+    <div class="footer">Pi-Star / Pi-Star Dashboard, Mod by BA4SMQ.</div>
 </div>
-</body>
-</html>
+</body></html>
