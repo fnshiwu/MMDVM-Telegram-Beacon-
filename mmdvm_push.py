@@ -150,28 +150,75 @@ class MMDVMMonitor:
             r'(?:, BER: (?P<ber>\d+\.?\d*)%)?', re.IGNORECASE
         )
 
-    def get_sys_info(self):
+# 初始化性能状态缓存
+        self.last_cpu_times = self._get_cpu_jiffies()
+        self.cached_ip = None
+        self.last_ip_check = 0
+
+    def _get_cpu_jiffies(self):
+        """直接读取内核 CPU 时间片，完全替代系统命令"""
         try:
-            ip = subprocess.getoutput("hostname -I").split()[0]
-            cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'")
-            mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'")
-            return ip, cpu, mem
+            with open('/proc/stat', 'r') as f:
+                line = f.readline()
+            # 获取用户、低优先级、内核、空闲时间片
+            parts = list(map(float, line.split()[1:5]))
+            return sum(parts), parts[3] # (总计, 空闲)
+        except: return 0, 0
+
+    def get_sys_info(self):
+        """
+        [原生方案] 获取本地 IP、CPU 和内存
+        相比 subprocess + hostname 节省 100% 子进程开销
+        """
+        try:
+            now = time.time()
+            # 1. 原生获取本地 IP (利用路由表探测)
+            if not self.cached_ip or (now - self.last_ip_check > 3600):
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                        s.settimeout(0)
+                        s.connect(('10.255.255.255', 1))
+                        self.cached_ip = s.getsockname()[0]
+                except:
+                    self.cached_ip = "127.0.0.1"
+                self.last_ip_check = now
+            
+            # 2. 计算 CPU 负载 (基于上次通联到现在的均值)
+            t2, idle2 = self._get_cpu_jiffies()
+            t1, idle1 = self.last_cpu_times
+            cpu_val = (1 - (idle2 - idle1) / (t2 - t1)) * 100 if t2 > t1 else 0.0
+            self.last_cpu_times = (t2, idle2)
+
+            # 3. 计算内存使用率 (直接读取 meminfo)
+            mem_dict = {}
+            with open('/proc/meminfo', 'r') as f:
+                for line in f:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        mem_dict[k.strip()] = int(v.split()[0])
+            total = mem_dict.get('MemTotal', 1)
+            # Linux 3.14+ 推荐使用 MemAvailable
+            avail = mem_dict.get('MemAvailable', mem_dict.get('MemFree', 0) + mem_dict.get('Cached', 0))
+            mem_val = (1 - avail / total) * 100
+
+            return self.cached_ip, f"{cpu_val:.1f}", f"{mem_val:.1f}%"
         except: return "Unknown", "0", "0"
 
-    def get_current_temp(self, conf):
+    def get_current_temp(self):
+        """直接读取内核热区温度"""
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read()) / 1000.0
-            return f"{temp_c:.1f}°C", temp_c
-        except: return "N/A", 0.0
+            return f"{temp_c:.1f}°C"
+        except: return "N/A"
 
-    def run(self):
+   def run(self):
         conf = ConfigManager.get_config()
         if conf.get('boot_push_enabled', True):
-            for i in range(10):
-                ip, cpu, mem = self.get_sys_info()
-                if ip != "Unknown": break
-                time.sleep(3)
+            # 启动采样延迟
+            time.sleep(0.5)
+            ip, cpu, mem = self.get_sys_info()
+            temp_str = self.get_current_temp()
             temp_str, _ = self.get_current_temp(conf)
             body = (f"🚀 **设备已上线**\n🌐 **当前IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             PushService.send(conf, "⚙️ 系统启动通知", body, color_tag="green")
