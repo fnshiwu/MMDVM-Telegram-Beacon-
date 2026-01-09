@@ -176,21 +176,33 @@ class MMDVMMonitor:
                     self.cached_ip = "127.0.0.1"
                 self.last_ip_check = now
             
-# 2. 计算 CPU 负载 (增加一个微小的采样等待确保数据有效)
+# 2. 计算整个系统的 CPU 负载 (增加 0.1s 采样窗口以获取真实值)
             t1, idle1 = self._get_cpu_jiffies()
-            time.sleep(0.1) # 强制等待 100ms 采样
+            time.sleep(0.1)  # 关键点：暂停 100ms 捕获整个系统的 CPU 活动
             t2, idle2 = self._get_cpu_jiffies()
             
             delta_total = t2 - t1
             delta_idle = idle2 - idle1
             
             if delta_total > 0:
+                # 计算逻辑：(总时间 - 空闲时间) / 总时间 = 整个系统占用率
                 cpu_val = (1 - delta_idle / delta_total) * 100
             else:
                 cpu_val = 0.0
-            
-            # 更新历史记录供下次使用（可选）
-            self.last_cpu_times = (t2, idle2)
+
+            # 3. 计算内存使用率 (读取整个系统的内存情况)
+            mem_dict = {}
+            with open('/proc/meminfo', 'r') as f:
+                for line in f:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        mem_dict[k.strip()] = int(v.split()[0])
+            total = mem_dict.get('MemTotal', 1)
+            avail = mem_dict.get('MemAvailable', mem_dict.get('MemFree', 0) + mem_dict.get('Cached', 0))
+            mem_val = (1 - avail / total) * 100
+
+            return self.cached_ip, f"{cpu_val:.1f}", f"{mem_val:.1f}%"
+        except: return "Unknown", "0.0", "0.0%"
 
             # 3. 计算内存使用率
             mem_dict = {}
