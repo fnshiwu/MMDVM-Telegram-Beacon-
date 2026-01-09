@@ -177,12 +177,17 @@ class MMDVMMonitor:
                 self.last_ip_check = now
             
             # CPU 采样
-            t1, idle1 = self._get_cpu_jiffies()
-            time.sleep(0.1) 
-            t2, idle2 = self._get_cpu_jiffies()
-            delta_total = t2 - t1
-            delta_idle = idle2 - idle1
-            cpu_val = (1 - delta_idle / delta_total) * 100 if delta_total > 0 else 0.0
+            t1, i1 = self._get_cpu_stat()
+            time.sleep(0.2) # 增加采样时间到 200ms 提高多核精度
+            t2, i2 = self._get_cpu_stat()
+            
+            total_delta = t2 - t1
+            idle_delta = i2 - i1
+            
+            if total_delta > 0:
+                cpu_val = (1 - idle_delta / total_delta) * 100
+            else:
+                cpu_val = 0.0
 
             # 3. 计算内存使用率 (读取整个系统的内存情况)
             mem_dict = {}
