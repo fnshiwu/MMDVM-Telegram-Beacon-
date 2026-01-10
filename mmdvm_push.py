@@ -4,9 +4,15 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from threading import Semaphore
 
-# --- 核心版本号 (唯一定义处) ---
-VERSION = "v3.0.4"
+# --- 核心版本号 ---
+VERSION = "v3.0.7-S"
 
+# --- [修复网页端] 必须置于顶部，确保面板调用秒回 ---
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print(VERSION)
+    sys.exit(0)
+
+# --- 路径与常量配置 ---
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -53,7 +59,7 @@ class HamInfoManager:
             "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦🇹 奥地利", "Sweden": "🇸🇪 瑞典",
             "Norway": "🇳🇴 挪威", "Denmark": "🇩🇰 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
             "Czech Republic": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰",
-            "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 保加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
+            "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 门加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
             "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 克罗地亚", "Serbia": "🇷🇸 塞尔维亚", "Slovenia": "🇸🇮 斯洛文尼亚",
             "Estonia": "🇪🇪 爱沙尼亚", "Latvia": "🇱🇻 拉脱维亚", "Lithuania": "🇱🇹 立陶宛", "Iceland": "🇮🇸 冰岛",
             "Luxembourg": "🇱🇺 卢森堡", "Monaco": "🇲🇨 摩纳哥", "Cyprus": "🇨🇾 塞浦路斯", "Malta": "🇲🇹 马耳他",
@@ -82,10 +88,8 @@ class HamInfoManager:
                         start = mm.rfind(b'\n', 0, idx) + 1
                         end = mm.find(b'\n', idx)
                         line_bytes = mm[start:end]
-                        try:
-                            line = line_bytes.decode('utf-8')
-                        except:
-                            line = line_bytes.decode('gb18030', 'ignore')
+                        try: line = line_bytes.decode('utf-8')
+                        except: line = line_bytes.decode('gb18030', 'ignore')
                         parts = line.split(',')
                         first_name = parts[2].strip() if len(parts) > 2 else ""
                         last_name = parts[3].strip() if len(parts) > 3 else ""
@@ -99,64 +103,52 @@ class HamInfoManager:
                                     break
                         else: country = self.geo_map.get(country, country)
                         full_name = f"{first_name} {last_name}".strip().upper()
-                        loc = f"{city}, {state} ({country})"
-                        return {"name": f" ({full_name})", "loc": loc}
+                        return {"name": f" ({full_name})", "loc": f"{city}, {state} ({country})"}
         except Exception: pass
         finally: self._io_lock.release()
         return {"name": "", "loc": "Unknown"}
 
 class PushService:
-    _max_workers = 3
-    _executor = ThreadPoolExecutor(max_workers=_max_workers)
-    _push_semaphore = Semaphore(_max_workers)
+    _executor = ThreadPoolExecutor(max_workers=3)
 
     @staticmethod
-    def get_fs_sign(secret, timestamp):
-        string_to_sign = f'{timestamp}\n{secret}'
-        hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
-        return base64.b64encode(hmac_code).decode('utf-8')
+    def post_with_retry(url, data=None, is_json=False, retries=2):
+        """【S级加固】带重试和强制超时"""
+        for i in range(retries + 1):
+            try:
+                req = urllib.request.Request(url, data=data, method='POST') if data else urllib.request.Request(url)
+                if is_json: req.add_header('Content-Type', 'application/json; charset=utf-8')
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    return response.read().decode()
+            except Exception:
+                if i == retries: return None
+                time.sleep(1)
 
     @classmethod
     def _do_push_logic(cls, config, type_label, body_text, is_voice):
-        with cls._push_semaphore:
-            if config.get('push_fs_enabled') and config.get('fs_webhook'):
-                ts = str(int(time.time()))
-                template = "blue" if is_voice else "orange" if "上线" in type_label else "green"
-                fs_payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]}}
-                if config.get('fs_secret'):
-                    fs_payload["timestamp"], fs_payload["sign"] = ts, cls.get_fs_sign(config['fs_secret'], ts)
-                cls.post_request(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
-            
-            if config.get('push_wx_enabled') and config.get('wx_token'):
-                br = "<br>"
-                html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
-                d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html_content, "template": "html"}).encode()
-                cls.post_request("http://www.pushplus.plus/send", data=d, is_json=True)
-            
-            if config.get('push_tg_enabled') and config.get('tg_token'):
-                text = f"<b>{type_label}</b>\n\n{body_text}"
-                url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
-                d = urllib.parse.urlencode({"chat_id": config['tg_chat_id'], "text": text, "parse_mode": "HTML"}).encode()
-                cls.post_request(url, data=d)
+        if config.get('push_fs_enabled') and config.get('fs_webhook'):
+            ts = str(int(time.time()))
+            template = "blue" if is_voice else "orange" if "上线" in type_label else "green"
+            payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]}}
+            if config.get('fs_secret'):
+                string_to_sign = f'{ts}\n{config["fs_secret"]}'
+                hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+                payload["timestamp"], payload["sign"] = ts, base64.b64encode(hmac_code).decode('utf-8')
+            cls.post_with_retry(config['fs_webhook'], data=json.dumps(payload).encode(), is_json=True)
+
+        if config.get('push_wx_enabled') and config.get('wx_token'):
+            br = "<br>"
+            html = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
+            d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html, "template": "html"}).encode()
+            cls.post_with_retry("http://www.pushplus.plus/send", data=d, is_json=True)
 
     @classmethod
-    def post_request(cls, url, data=None, is_json=False):
-        try:
-            req = urllib.request.Request(url, data=data, method='POST') if data else urllib.request.Request(url)
-            if is_json: req.add_header('Content-Type', 'application/json; charset=utf-8')
-            with urllib.request.urlopen(req, timeout=10) as response: return response.read().decode()
-        except: return None
-
-    @classmethod
-    def send(cls, config, type_label, body_text, is_voice=True, async_mode=True):
-        if async_mode: cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
-        else: cls._do_push_logic(config, type_label, body_text, is_voice)
+    def send(cls, config, type_label, body_text, is_voice=True):
+        cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
 
 class MMDVMMonitor:
     def __init__(self):
         self.last_msg = {"call": "", "ts": 0}
-        self.last_temp_alert_time = 0
-        self.last_temp_check_time = 0
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
         self.re_master = re.compile(r'end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from (?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), (?P<dur>\d+\.?\d*) seconds(?:, (?P<loss>\d+)% packet loss)?(?:, BER: (?P<ber>\d+\.?\d*)%)?', re.IGNORECASE)
 
@@ -172,53 +164,40 @@ class MMDVMMonitor:
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read()) / 1000.0
-            unit = conf.get('temp_unit', 'C')
-            if unit == 'F':
-                val = (temp_c * 9/5) + 32
-                return f"{val:.1f}°F", val
             return f"{temp_c:.1f}°C", temp_c
         except: return "N/A", 0.0
 
-    def check_temp_alert(self, conf):
-        if not conf.get('temp_alert_enabled'): return
-        now = time.time()
-        if now - self.last_temp_check_time < 60: return
-        self.last_temp_check_time = now
-        display_str, current_val = self.get_current_temp(conf)
-        threshold = float(conf.get('temp_threshold', 65.0))
-        if current_val >= threshold:
-            interval_sec = int(conf.get('temp_interval', 30)) * 60
-            if now - self.last_temp_alert_time > interval_sec:
-                self.last_temp_alert_time = now
-                alert_body = (f"🚨 **硬件高温预警**\n🔥 **当前温度**: {display_str}\n⚠️ **预警阈值**: {threshold:.1f}{conf.get('temp_unit','C')}\n⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}")
-                PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
-
     def run(self):
         conf = ConfigManager.get_config()
-        for i in range(10):
-            ip_check = subprocess.getoutput("hostname -I").strip()
-            if ip_check and not ip_check.startswith("127."): break
-            time.sleep(5)
         if conf.get('boot_push_enabled', True):
-            ip, cpu, mem = self.get_sys_info()
+            for _ in range(10):
+                ip, cpu, mem = self.get_sys_info()
+                if ip != "Unknown": break
+                time.sleep(3)
             temp_str, _ = self.get_current_temp(conf)
-            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **当前IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
+
         while True:
             try:
                 log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
                 if not log_files: time.sleep(5); continue
                 current_log = max(log_files, key=os.path.getmtime)
-                with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
-                    f.seek(0, 2)
-                    last_rot_check = time.time()
-                    while True:
-                        if time.time() - last_rot_check > 5:
-                            if max(log_files, key=os.path.getmtime) != current_log: break
-                            last_rot_check = time.time()
-                        line = f.readline()
-                        if not line: time.sleep(0.1); continue
-                        self.process_line(line)
+                
+                # 【S级加固】日志打开保护逻辑
+                try:
+                    with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
+                        f.seek(0, 2)
+                        last_rot_check = time.time()
+                        while True:
+                            if time.time() - last_rot_check > 5:
+                                if max(log_files, key=os.path.getmtime) != current_log: break
+                                last_rot_check = time.time()
+                            line = f.readline()
+                            if not line: time.sleep(0.1); continue
+                            self.process_line(line)
+                except (FileNotFoundError, PermissionError, OSError):
+                    time.sleep(1); continue
             except Exception: time.sleep(5)
 
     def process_line(self, line):
@@ -226,16 +205,14 @@ class MMDVMMonitor:
         match = self.re_master.search(line)
         if not match: return
         conf = ConfigManager.get_config()
-        self.check_temp_alert(conf)
-        
         call = match.group('call').upper()
         dur = float(match.group('dur'))
-
-        # --- 核心修改处：同时判断 my_callsign 和 ignore_list ---
-        if call == conf.get('my_callsign') or call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0):
+        my_call = conf.get('my_callsign', '').upper()
+        
+        # 屏蔽逻辑：时长、屏蔽列表、自己呼号
+        if (my_call and call == my_call) or call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0):
             return
-        # -----------------------------------------------
-
+        
         curr_ts = time.time()
         if call == self.last_msg["call"] and (curr_ts - self.last_msg["ts"]) < 3: return
         self.last_msg.update({"call": call, "ts": curr_ts})
@@ -244,21 +221,8 @@ class MMDVMMonitor:
         temp_str, _ = self.get_current_temp(conf)
         is_v = 'data' not in match.group('v_type').lower()
         slot = " (Slot 1)" if "Slot 1" in line else " (Slot 2)" if "Slot 2" in line else ""
-
         body = (f"👤 **呼号**: {call}{info['name']}\n👥 **群组**: {match.group('target').strip()}\n📍 **地区**: {info['loc']}\n📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n⏳ **时长**: {dur}秒\n📦 **丢失**: {match.group('loss') or '0'}%\n📉 **误码**: {match.group('ber') or '0.0'}%\n🌡️ **温度**: {temp_str}")
         PushService.send(conf, f"{'🎙️ 语音通联' if is_v else '💾 数据模式'}{slot}", body, is_voice=is_v)
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--version":
-        print(VERSION)
-        sys.exit(0)
-    monitor = MMDVMMonitor()
-    if len(sys.argv) > 1 and sys.argv[1] == "--test":
-        conf = ConfigManager.get_config()
-        ip, cpu, mem = monitor.get_sys_info()
-        temp_str, _ = monitor.get_current_temp(conf)
-        test_body = (f"通道测试成功 ({VERSION})\n🌐 **IP**: {ip}\n🌡️ **温度**: {temp_str}\n📊 **CPU**: {cpu}%\n💾 **内存**: {mem}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}")
-        PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
-        print("Success")
-    else:
-        monitor.run()
+    MMDVMMonitor().run()
