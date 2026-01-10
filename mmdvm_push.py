@@ -51,10 +51,10 @@ class HamInfoManager:
             "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵🇹 葡萄牙",
             "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", "Netherlands": "🇳🇱 荷兰",
             "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦🇹 奥地利", "Sweden": "🇸🇪 瑞典",
-            "Norway": "🇳挪威", "Denmark": "🇩🇰 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
+            "Norway": "🇳🇴 挪威", "Denmark": "🇩🇰 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
             "Czech Republic": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰",
-            "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 门加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
-            "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 跨罗地亚", "Serbia": "🇷🇸 塞尔维亚", "Slovenia": "🇸🇮 斯洛文尼亚",
+            "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 保加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
+            "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 克罗地亚", "Serbia": "🇷🇸 塞尔维亚", "Slovenia": "🇸🇮 斯洛文尼亚",
             "Estonia": "🇪🇪 爱沙尼亚", "Latvia": "🇱🇻 拉脱维亚", "Lithuania": "🇱🇹 立陶宛", "Iceland": "🇮🇸 冰岛",
             "Luxembourg": "🇱🇺 卢森堡", "Monaco": "🇲🇨 摩纳哥", "Cyprus": "🇨🇾 塞浦路斯", "Malta": "🇲🇹 马耳他",
             "United States": "🇺🇸 美国", "USA": "🇺🇸 美国", "Canada": "🇨🇦 加拿大", "Mexico": "🇲🇽 墨西哥",
@@ -65,7 +65,7 @@ class HamInfoManager:
             "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
             "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
             "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", "Kenya": "🇰🇪 肯尼亚",
-            "Morocco": "🇲🇦 摩论哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
+            "Morocco": "🇲🇦 摩洛哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", "Seychelles": "🇸🇨 塞舌尔"
         }
 
@@ -106,7 +106,10 @@ class HamInfoManager:
         return {"name": "", "loc": "Unknown"}
 
 class PushService:
-    _executor = ThreadPoolExecutor(max_workers=3)
+    _max_workers = 3
+    _executor = ThreadPoolExecutor(max_workers=_max_workers)
+    _push_semaphore = Semaphore(_max_workers)
+
     @staticmethod
     def get_fs_sign(secret, timestamp):
         string_to_sign = f'{timestamp}\n{secret}'
@@ -115,23 +118,26 @@ class PushService:
 
     @classmethod
     def _do_push_logic(cls, config, type_label, body_text, is_voice):
-        if config.get('push_fs_enabled') and config.get('fs_webhook'):
-            ts = str(int(time.time()))
-            template = "blue" if is_voice else "orange" if "上线" in type_label else "green"
-            fs_payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]}}
-            if config.get('fs_secret'):
-                fs_payload["timestamp"], fs_payload["sign"] = ts, cls.get_fs_sign(config['fs_secret'], ts)
-            cls.post_request(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
-        if config.get('push_wx_enabled') and config.get('wx_token'):
-            br = "<br>"
-            html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
-            d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html_content, "template": "html"}).encode()
-            cls.post_request("http://www.pushplus.plus/send", data=d, is_json=True)
-        if config.get('push_tg_enabled') and config.get('tg_token'):
-            text = f"<b>{type_label}</b>\n\n{body_text}"
-            url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
-            d = urllib.parse.urlencode({"chat_id": config['tg_chat_id'], "text": text, "parse_mode": "HTML"}).encode()
-            cls.post_request(url, data=d)
+        with cls._push_semaphore:
+            if config.get('push_fs_enabled') and config.get('fs_webhook'):
+                ts = str(int(time.time()))
+                template = "blue" if is_voice else "orange" if "上线" in type_label else "green"
+                fs_payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]}}
+                if config.get('fs_secret'):
+                    fs_payload["timestamp"], fs_payload["sign"] = ts, cls.get_fs_sign(config['fs_secret'], ts)
+                cls.post_request(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
+            
+            if config.get('push_wx_enabled') and config.get('wx_token'):
+                br = "<br>"
+                html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
+                d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html_content, "template": "html"}).encode()
+                cls.post_request("http://www.pushplus.plus/send", data=d, is_json=True)
+            
+            if config.get('push_tg_enabled') and config.get('tg_token'):
+                text = f"<b>{type_label}</b>\n\n{body_text}"
+                url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
+                d = urllib.parse.urlencode({"chat_id": config['tg_chat_id'], "text": text, "parse_mode": "HTML"}).encode()
+                cls.post_request(url, data=d)
 
     @classmethod
     def post_request(cls, url, data=None, is_json=False):
@@ -155,7 +161,6 @@ class MMDVMMonitor:
         self.re_master = re.compile(r'end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from (?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), (?P<dur>\d+\.?\d*) seconds(?:, (?P<loss>\d+)% packet loss)?(?:, BER: (?P<ber>\d+\.?\d*)%)?', re.IGNORECASE)
 
     def get_sys_info(self):
-        """还原：使用明确指示的 subprocess 办法获取"""
         try:
             ip = subprocess.getoutput("hostname -I").split()[0]
             cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'")
@@ -164,7 +169,6 @@ class MMDVMMonitor:
         except: return "Unknown", "0", "0"
 
     def get_current_temp(self, conf):
-        """明确修改：使用原生方式读取温度文件以优化性能"""
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read()) / 1000.0
@@ -223,18 +227,24 @@ class MMDVMMonitor:
         if not match: return
         conf = ConfigManager.get_config()
         self.check_temp_alert(conf)
+        
         call = match.group('call').upper()
         dur = float(match.group('dur'))
-# 增加 conf.get('my_callsign') 的判断
+
+        # --- 核心修改处：同时判断 my_callsign 和 ignore_list ---
         if call == conf.get('my_callsign') or call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0):
-        return
+            return
+        # -----------------------------------------------
+
         curr_ts = time.time()
         if call == self.last_msg["call"] and (curr_ts - self.last_msg["ts"]) < 3: return
         self.last_msg.update({"call": call, "ts": curr_ts})
+        
         info = self.ham_manager.get_info(call)
         temp_str, _ = self.get_current_temp(conf)
         is_v = 'data' not in match.group('v_type').lower()
         slot = " (Slot 1)" if "Slot 1" in line else " (Slot 2)" if "Slot 2" in line else ""
+
         body = (f"👤 **呼号**: {call}{info['name']}\n👥 **群组**: {match.group('target').strip()}\n📍 **地区**: {info['loc']}\n📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n⏳ **时长**: {dur}秒\n📦 **丢失**: {match.group('loss') or '0'}%\n📉 **误码**: {match.group('ber') or '0.0'}%\n🌡️ **温度**: {temp_str}")
         PushService.send(conf, f"{'🎙️ 语音通联' if is_v else '💾 数据模式'}{slot}", body, is_voice=is_v)
 
