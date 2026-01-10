@@ -4,8 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from threading import Semaphore
 
-# --- 核心版本号 (唯一定义处) ---
-VERSION = "v3.0.4"
+# --- 核心版本号 ---
+VERSION = "v3.0.7"
+
+# --- [修复网页端调用] 必须置于顶部 ---
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print(VERSION)
+    sys.exit(0)
 
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
@@ -82,10 +87,8 @@ class HamInfoManager:
                         start = mm.rfind(b'\n', 0, idx) + 1
                         end = mm.find(b'\n', idx)
                         line_bytes = mm[start:end]
-                        try:
-                            line = line_bytes.decode('utf-8')
-                        except:
-                            line = line_bytes.decode('gb18030', 'ignore')
+                        try: line = line_bytes.decode('utf-8')
+                        except: line = line_bytes.decode('gb18030', 'ignore')
                         parts = line.split(',')
                         first_name = parts[2].strip() if len(parts) > 2 else ""
                         last_name = parts[3].strip() if len(parts) > 3 else ""
@@ -125,27 +128,32 @@ class PushService:
                 fs_payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]}}
                 if config.get('fs_secret'):
                     fs_payload["timestamp"], fs_payload["sign"] = ts, cls.get_fs_sign(config['fs_secret'], ts)
-                cls.post_request(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
+                cls.post_with_retry(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
             
             if config.get('push_wx_enabled') and config.get('wx_token'):
                 br = "<br>"
                 html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
                 d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html_content, "template": "html"}).encode()
-                cls.post_request("http://www.pushplus.plus/send", data=d, is_json=True)
+                cls.post_with_retry("http://www.pushplus.plus/send", data=d, is_json=True)
             
             if config.get('push_tg_enabled') and config.get('tg_token'):
                 text = f"<b>{type_label}</b>\n\n{body_text}"
                 url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
                 d = urllib.parse.urlencode({"chat_id": config['tg_chat_id'], "text": text, "parse_mode": "HTML"}).encode()
-                cls.post_request(url, data=d)
+                cls.post_with_retry(url, data=d)
 
     @classmethod
-    def post_request(cls, url, data=None, is_json=False):
-        try:
-            req = urllib.request.Request(url, data=data, method='POST') if data else urllib.request.Request(url)
-            if is_json: req.add_header('Content-Type', 'application/json; charset=utf-8')
-            with urllib.request.urlopen(req, timeout=10) as response: return response.read().decode()
-        except: return None
+    def post_with_retry(cls, url, data=None, is_json=False, retries=2):
+        """[S级加固] 强制重试与丢弃机制"""
+        for i in range(retries + 1):
+            try:
+                req = urllib.request.Request(url, data=data, method='POST') if data else urllib.request.Request(url)
+                if is_json: req.add_header('Content-Type', 'application/json; charset=utf-8')
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    return response.read().decode()
+            except:
+                if i == retries: return None # 彻底失败，丢弃任务防止卡死
+                time.sleep(1)
 
     @classmethod
     def send(cls, config, type_label, body_text, is_voice=True, async_mode=True):
@@ -209,16 +217,21 @@ class MMDVMMonitor:
                 log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
                 if not log_files: time.sleep(5); continue
                 current_log = max(log_files, key=os.path.getmtime)
-                with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
-                    f.seek(0, 2)
-                    last_rot_check = time.time()
-                    while True:
-                        if time.time() - last_rot_check > 5:
-                            if max(log_files, key=os.path.getmtime) != current_log: break
-                            last_rot_check = time.time()
-                        line = f.readline()
-                        if not line: time.sleep(0.1); continue
-                        self.process_line(line)
+                
+                # [S级加固] 日志打开逻辑保护，防止轮转闪退
+                try:
+                    with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
+                        f.seek(0, 2)
+                        last_rot_check = time.time()
+                        while True:
+                            if time.time() - last_rot_check > 5:
+                                if max(log_files, key=os.path.getmtime) != current_log: break
+                                last_rot_check = time.time()
+                            line = f.readline()
+                            if not line: time.sleep(0.1); continue
+                            self.process_line(line)
+                except (FileNotFoundError, PermissionError, OSError):
+                    time.sleep(1); continue
             except Exception: time.sleep(5)
 
     def process_line(self, line):
@@ -231,10 +244,8 @@ class MMDVMMonitor:
         call = match.group('call').upper()
         dur = float(match.group('dur'))
 
-        # --- 核心修改处：同时判断 my_callsign 和 ignore_list ---
         if call == conf.get('my_callsign') or call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0):
             return
-        # -----------------------------------------------
 
         curr_ts = time.time()
         if call == self.last_msg["call"] and (curr_ts - self.last_msg["ts"]) < 3: return
@@ -249,9 +260,6 @@ class MMDVMMonitor:
         PushService.send(conf, f"{'🎙️ 语音通联' if is_v else '💾 数据模式'}{slot}", body, is_voice=is_v)
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--version":
-        print(VERSION)
-        sys.exit(0)
     monitor = MMDVMMonitor()
     if len(sys.argv) > 1 and sys.argv[1] == "--test":
         conf = ConfigManager.get_config()
