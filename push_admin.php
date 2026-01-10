@@ -4,6 +4,10 @@ $configFile = '/etc/mmdvm_push.json';
 $serviceName = 'mmdvm_push.service';
 $scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
 
+// --- 从核心脚本统一获取版本号 ---
+$version = trim(@shell_exec("python3 $scriptPath --version"));
+if (empty($version)) { $version = 'v3.0.4'; }
+
 function set_disk($mode) { @shell_exec("sudo rpi-$mode"); }
 
 if (!file_exists($configFile)) {
@@ -38,7 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "ui_lang" => $config['ui_lang']
         ];
         file_put_contents($configFile, json_encode($config, 192));
-        
         if ($_POST['action'] === 'save') {
             $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         }
@@ -52,10 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         $out = []; $res = 0;
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
         $foundSuccess = false;
-        foreach ($out as $line) {
-            if (stripos($line, 'Success') !== false) { $foundSuccess = true; break; }
-        }
-        
+        foreach ($out as $line) { if (stripos($line, 'Success') !== false) { $foundSuccess = true; break; } }
         if ($foundSuccess) {
             $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success";
         } else {
@@ -88,7 +88,7 @@ $lang = [
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" type="text/css" href="css/pistar-css.php" />
-    <title>Push Notifier Settings</title>
+    <title>Push Notifier Settings <?php echo $version; ?></title>
     <style type="text/css">
         textarea { width: 95%; height: 55px; font-family: monospace; font-size: 12px; }
         input[type="text"], input[type="password"] { width: 95%; height: 22px; }
@@ -105,7 +105,7 @@ $lang = [
 <div class="container">
     <div class="header">
         <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: <?php echo exec('hostname'); ?></div>
-        <h1>Pi-Star Push Notifier - BA4SMQ</h1>
+        <h1>Pi-Star Push Notifier - BA4SMQ (<?php echo $version; ?>)</h1>
         <p style="text-align: right; padding-right: 10px; color: #fff;">
             <a href="/" style="color: #fff;"><?php echo $lang['nav_dash']; ?></a> | 
             <a href="/admin/" style="color: #fff;"><?php echo $lang['nav_admin']; ?></a> | 
@@ -166,6 +166,6 @@ $lang = [
             </td></tr>
         </table></form>
     </div>
-    <div class="footer">Pi-Star / Pi-Star Dashboard, Mod by BA4SMQ.</div>
+    <div class="footer">Pi-Star / Pi-Star Dashboard <?php echo $version; ?>, Mod by BA4SMQ.</div>
 </div>
 </body></html>
