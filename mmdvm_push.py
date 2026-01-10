@@ -4,7 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from threading import Semaphore
 
-# --- 路径与常量配置 ---
+# --- 核心版本号 (唯一定义处) ---
+VERSION = "v3.0.4"
+
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -45,11 +47,11 @@ class HamInfoManager:
             "Turkey": "🇹🇷 土耳其", "Iran": "🇮🇷 伊朗", "Iraq": "🇮🇶 伊拉克", "Kuwait": "🇰🇼 科威特",
             "Oman": "🇴🇲 阿曼", "Qatar": "🇶🇦 卡塔尔", "Jordan": "🇯🇴 约旦", "Lebanon": "🇱🇧 黎巴嫩",
             "Kazakhstan": "🇰🇿 哈萨克斯坦", "Uzbekistan": "🇺🇿 乌兹别克斯坦",
-            "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "England": "🇬🇧 英国", "Germany": "🇩🇪 德国",
+            "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "Germany": "🇩🇪 德国",
             "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵🇹 葡萄牙",
             "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", "Netherlands": "🇳🇱 荷兰",
             "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦🇹 奥地利", "Sweden": "🇸🇪 瑞典",
-            "Norway": "🇳🇴 挪威", "Denmark": "🇩🇰 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
+            "Norway": "🇳挪威", "Denmark": "🇩🇰 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
             "Czech Republic": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰",
             "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 门加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
             "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 跨罗地亚", "Serbia": "🇷🇸 塞尔维亚", "Slovenia": "🇸🇮 斯洛文尼亚",
@@ -63,7 +65,7 @@ class HamInfoManager:
             "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
             "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
             "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", "Kenya": "🇰🇪 肯尼亚",
-            "Morocco": "🇲🇦 摩洛哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
+            "Morocco": "🇲🇦 摩论哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", "Seychelles": "🇸🇨 塞舌尔"
         }
 
@@ -84,22 +86,18 @@ class HamInfoManager:
                             line = line_bytes.decode('utf-8')
                         except:
                             line = line_bytes.decode('gb18030', 'ignore')
-                        
                         parts = line.split(',')
                         first_name = parts[2].strip() if len(parts) > 2 else ""
                         last_name = parts[3].strip() if len(parts) > 3 else ""
                         city = parts[4].strip().title() if len(parts) > 4 else ""
                         state = parts[5].strip().upper() if len(parts) > 5 else ""
                         country = parts[6].strip()
-
                         if any('\u4e00' <= char <= '\u9fff' for char in country):
                             for k, v in self.geo_map.items():
                                 if k in country or (len(v.split()) > 1 and v.split()[1] in country):
                                     country = v
                                     break
-                        else:
-                            country = self.geo_map.get(country, country)
-
+                        else: country = self.geo_map.get(country, country)
                         full_name = f"{first_name} {last_name}".strip().upper()
                         loc = f"{city}, {state} ({country})"
                         return {"name": f" ({full_name})", "loc": loc}
@@ -109,7 +107,6 @@ class HamInfoManager:
 
 class PushService:
     _executor = ThreadPoolExecutor(max_workers=3)
-
     @staticmethod
     def get_fs_sign(secret, timestamp):
         string_to_sign = f'{timestamp}\n{secret}'
@@ -121,23 +118,15 @@ class PushService:
         if config.get('push_fs_enabled') and config.get('fs_webhook'):
             ts = str(int(time.time()))
             template = "blue" if is_voice else "orange" if "上线" in type_label else "green"
-            fs_payload = {
-                "msg_type": "interactive", 
-                "card": {
-                    "header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, 
-                    "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]
-                }
-            }
+            fs_payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": type_label}, "template": template}, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body_text}}]}}
             if config.get('fs_secret'):
                 fs_payload["timestamp"], fs_payload["sign"] = ts, cls.get_fs_sign(config['fs_secret'], ts)
             cls.post_request(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
-
         if config.get('push_wx_enabled') and config.get('wx_token'):
             br = "<br>"
             html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
             d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html_content, "template": "html"}).encode()
             cls.post_request("http://www.pushplus.plus/send", data=d, is_json=True)
-
         if config.get('push_tg_enabled') and config.get('tg_token'):
             text = f"<b>{type_label}</b>\n\n{body_text}"
             url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
@@ -163,16 +152,10 @@ class MMDVMMonitor:
         self.last_temp_alert_time = 0
         self.last_temp_check_time = 0
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
-        self.re_master = re.compile(
-            r'end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from '
-            r'(?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), '
-            r'(?P<dur>\d+\.?\d*) seconds'
-            r'(?:, (?P<loss>\d+)% packet loss)?'
-            r'(?:, BER: (?P<ber>\d+\.?\d*)%)?', re.IGNORECASE
-        )
+        self.re_master = re.compile(r'end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from (?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), (?P<dur>\d+\.?\d*) seconds(?:, (?P<loss>\d+)% packet loss)?(?:, BER: (?P<ber>\d+\.?\d*)%)?', re.IGNORECASE)
 
     def get_sys_info(self):
-        """其他系统信息维持原有获取办法"""
+        """还原：使用明确指示的 subprocess 办法获取"""
         try:
             ip = subprocess.getoutput("hostname -I").split()[0]
             cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'")
@@ -181,12 +164,10 @@ class MMDVMMonitor:
         except: return "Unknown", "0", "0"
 
     def get_current_temp(self, conf):
-        """仅修改此处：使用原生方式读取温度文件，不调用 cat 或 top"""
+        """明确修改：使用原生方式读取温度文件以优化性能"""
         try:
-            # 树莓派/Linux 通用 CPU 温度路径
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read()) / 1000.0
-            
             unit = conf.get('temp_unit', 'C')
             if unit == 'F':
                 val = (temp_c * 9/5) + 32
@@ -205,10 +186,7 @@ class MMDVMMonitor:
             interval_sec = int(conf.get('temp_interval', 30)) * 60
             if now - self.last_temp_alert_time > interval_sec:
                 self.last_temp_alert_time = now
-                alert_body = (f"🚨 **硬件高温预警**\n"
-                              f"🔥 **当前温度**: {display_str}\n"
-                              f"⚠️ **预警阈值**: {threshold:.1f}{conf.get('temp_unit','C')}\n"
-                              f"⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}")
+                alert_body = (f"🚨 **硬件高温预警**\n🔥 **当前温度**: {display_str}\n⚠️ **预警阈值**: {threshold:.1f}{conf.get('temp_unit','C')}\n⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}")
                 PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
 
     def run(self):
@@ -217,13 +195,11 @@ class MMDVMMonitor:
             ip_check = subprocess.getoutput("hostname -I").strip()
             if ip_check and not ip_check.startswith("127."): break
             time.sleep(5)
-        
         if conf.get('boot_push_enabled', True):
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
-            body = (f"🚀 **设备已上线**\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
-
         while True:
             try:
                 log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
@@ -257,29 +233,19 @@ class MMDVMMonitor:
         temp_str, _ = self.get_current_temp(conf)
         is_v = 'data' not in match.group('v_type').lower()
         slot = " (Slot 1)" if "Slot 1" in line else " (Slot 2)" if "Slot 2" in line else ""
-        body = (f"👤 **呼号**: {call}{info['name']}\n"
-                f"👥 **群组**: {match.group('target').strip()}\n"
-                f"📍 **地区**: {info['loc']}\n"
-                f"📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n"
-                f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"⏳ **时长**: {dur}秒\n"
-                f"📦 **丢失**: {match.group('loss') or '0'}%\n"
-                f"📉 **误码**: {match.group('ber') or '0.0'}%\n"
-                f"🌡️ **温度**: {temp_str}")
+        body = (f"👤 **呼号**: {call}{info['name']}\n👥 **群组**: {match.group('target').strip()}\n📍 **地区**: {info['loc']}\n📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n⏳ **时长**: {dur}秒\n📦 **丢失**: {match.group('loss') or '0'}%\n📉 **误码**: {match.group('ber') or '0.0'}%\n🌡️ **温度**: {temp_str}")
         PushService.send(conf, f"{'🎙️ 语音通联' if is_v else '💾 数据模式'}{slot}", body, is_voice=is_v)
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--version":
+        print(VERSION)
+        sys.exit(0)
     monitor = MMDVMMonitor()
     if len(sys.argv) > 1 and sys.argv[1] == "--test":
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
         temp_str, _ = monitor.get_current_temp(conf)
-        test_body = (f"通道测试成功\n"
-                     f"🌐 **内网IP**: {ip}\n"
-                     f"🌡️ **系统温度**: {temp_str}\n"
-                     f"📊 **CPU占用**: {cpu}%\n"
-                     f"💾 **内存占用**: {mem}\n"
-                     f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}")
+        test_body = (f"通道测试成功 ({VERSION})\n🌐 **IP**: {ip}\n🌡️ **温度**: {temp_str}\n📊 **CPU**: {cpu}%\n💾 **内存**: {mem}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}")
         PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
         print("Success")
     else:
