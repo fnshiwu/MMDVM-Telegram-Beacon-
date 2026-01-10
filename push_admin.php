@@ -19,8 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
+        file_put_contents($configFile, json_encode($config, 192));
     } elseif ($_POST['action'] === 'save' || $_POST['action'] === 'test') {
-        // 保存与测试前，先提取页面上的最新配置
         $config = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
             "min_duration" => floatval($_POST['min_duration']),
@@ -49,20 +49,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo systemctl $action $serviceName");
     
     if ($action === 'test') {
-        // 同步捕获 Python 测试结果
         $out = []; $res = 0;
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
-        $msg = "No feedback";
+        $foundSuccess = false;
         foreach ($out as $line) {
-            if (strpos($line, 'Success') !== false) { $msg = "Success"; break; }
-            if (strpos($line, 'Error') !== false || strpos($line, 'Exception') !== false) { $msg = $line; break; }
+            if (stripos($line, 'Success') !== false) { $foundSuccess = true; break; }
         }
         
-        // 成功显示对勾，失败显示红叉
-        if ($msg === "Success") {
+        if ($foundSuccess) {
             $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success";
         } else {
-            $alertMsg = ($config['ui_lang'] == 'cn') ? "❌ 测试反馈: $msg" : "❌ Test Feedback: $msg";
+            $errMsg = !empty($out) ? implode(" ", $out) : "Unknown Error";
+            $alertMsg = ($config['ui_lang'] == 'cn') ? "❌ 测试失败: $errMsg" : "❌ Test Failed: $errMsg";
         }
     }
 }
@@ -75,12 +73,12 @@ $lang = [
     'cn' => [
         'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围',
         'boot_set'=>'启动通知','temp_set'=>'高温预警','en_boot'=>'设备启动提醒','en_temp'=>'高温预警','th_temp'=>'预警阈值','int_temp'=>'预警间隔 (分)',
-        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)'
+        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)','list_hint'=>'呼号每行一个'
     ],
     'en' => [
         'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range',
         'boot_set'=>'Boot Notice','temp_set'=>'Temp Alert','en_boot'=>'Enable Boot Push','en_temp'=>'Enable Temp Alert','th_temp'=>'Threshold','int_temp'=>'Interval (min)',
-        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List'
+        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List','list_hint'=>'One callsign per line'
     ]
 ][$current_lang];
 ?>
@@ -99,7 +97,6 @@ $lang = [
         .time-box { width: 80px !important; }
         .num-box { width: 60px !important; }
         .btn-test { background: #b55; color: white; font-weight: bold; border: 1px solid #000; cursor: pointer; }
-        
         table.settings td:first-child { font-weight: bold; text-align: left !important; padding-left: 10px; width: 35%; }
         table.settings td:last-child { text-align: left !important; padding-left: 10px; }
     </style>
@@ -128,7 +125,6 @@ $lang = [
                 <button type="submit" name="action" value="stop"><?php echo $lang['btn_stop']; ?></button>
                 <button type="submit" name="action" value="restart"><?php echo $lang['btn_res']; ?></button>
             </td></tr>
-            
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
             <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
             <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration'];?>" /></td></tr>
@@ -137,10 +133,8 @@ $lang = [
                 <input type="time" name="qm_start" class="time-box" value="<?php echo $config['quiet_mode']['start']??'23:00';?>" /> - 
                 <input type="time" name="qm_end" class="time-box" value="<?php echo $config['quiet_mode']['end']??'07:00';?>" />
             </td></tr>
-
             <thead><tr><th colspan="2"><?php echo $lang['boot_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en_boot']; ?>:</td><td><input type="checkbox" name="boot_en" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
-            
             <thead><tr><th colspan="2"><?php echo $lang['temp_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en_temp']; ?>:</td><td><input type="checkbox" name="temp_en" <?php echo ($config['temp_alert_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td><?php echo $lang['th_temp']; ?>:</td><td>
@@ -151,26 +145,21 @@ $lang = [
                 </select>
             </td></tr>
             <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
-
             <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token']??'';?>" /></td></tr>
             <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id']??'';?>" /></td></tr>
-            
             <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token']??'';?>" /></td></tr>
-            
             <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
             <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
-
             <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['ignore_list']??[]);?></textarea></td></tr>
+            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo implode("\n", $config['ignore_list']??[]);?></textarea></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="呼号每行一个"><?php echo implode("\n", $config['focus_list']??[]);?></textarea></td></tr>
-            
+            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo implode("\n", $config['focus_list']??[]);?></textarea></td></tr>
             <tr><td colspan="2" style="text-align: center !important; padding: 25px 0;">
                 <button type="submit" name="action" value="save" style="width:130px; height:34px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
                 <button type="submit" name="action" value="test" class="btn-test" style="width:130px; height:34px; margin-left: 30px;"><?php echo $lang['btn_test']; ?></button>
