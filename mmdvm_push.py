@@ -35,7 +35,6 @@ class HamInfoManager:
     def __init__(self, id_file):
         self.id_file = id_file
         self._io_lock = Semaphore(4)
-        # 恢复完整的国家映射表
         self.geo_map = {
             "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", "Taiwan": "🇹🇼 中国台湾",
             "Japan": "🇯🇵 日本", "Korea": "🇰🇷 韩国", "South Korea": "🇰🇷 韩国", "North Korea": "🇰🇵 朝鲜",
@@ -93,7 +92,6 @@ class HamInfoManager:
                         state = parts[5].strip().upper() if len(parts) > 5 else ""
                         country = parts[6].strip()
 
-                        # 处理中文和国家映射
                         if any('\u4e00' <= char <= '\u9fff' for char in country):
                             for k, v in self.geo_map.items():
                                 if k in country or (len(v.split()) > 1 and v.split()[1] in country):
@@ -120,7 +118,6 @@ class PushService:
 
     @classmethod
     def _do_push_logic(cls, config, type_label, body_text, is_voice):
-        # 1. 飞书
         if config.get('push_fs_enabled') and config.get('fs_webhook'):
             ts = str(int(time.time()))
             template = "blue" if is_voice else "orange" if "上线" in type_label else "green"
@@ -135,14 +132,12 @@ class PushService:
                 fs_payload["timestamp"], fs_payload["sign"] = ts, cls.get_fs_sign(config['fs_secret'], ts)
             cls.post_request(config['fs_webhook'], data=json.dumps(fs_payload).encode(), is_json=True)
 
-        # 2. 微信 (PushPlus)
         if config.get('push_wx_enabled') and config.get('wx_token'):
             br = "<br>"
             html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
             d = json.dumps({"token": config['wx_token'], "title": type_label, "content": html_content, "template": "html"}).encode()
             cls.post_request("http://www.pushplus.plus/send", data=d, is_json=True)
 
-        # 3. Telegram
         if config.get('push_tg_enabled') and config.get('tg_token'):
             text = f"<b>{type_label}</b>\n\n{body_text}"
             url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
@@ -168,7 +163,6 @@ class MMDVMMonitor:
         self.last_temp_alert_time = 0
         self.last_temp_check_time = 0
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
-        # 兼容性正则
         self.re_master = re.compile(
             r'end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from '
             r'(?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), '
@@ -215,7 +209,6 @@ class MMDVMMonitor:
 
     def run(self):
         conf = ConfigManager.get_config()
-        # 启动自检与通告
         for i in range(10):
             ip_check = subprocess.getoutput("hostname -I").strip()
             if ip_check and not ip_check.startswith("127."): break
@@ -248,23 +241,18 @@ class MMDVMMonitor:
         if "end of" not in line.lower(): return
         match = self.re_master.search(line)
         if not match: return
-
         conf = ConfigManager.get_config()
         self.check_temp_alert(conf)
-        
         call = match.group('call').upper()
         dur = float(match.group('dur'))
         if call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0): return
-        
         curr_ts = time.time()
         if call == self.last_msg["call"] and (curr_ts - self.last_msg["ts"]) < 3: return
         self.last_msg.update({"call": call, "ts": curr_ts})
-        
         info = self.ham_manager.get_info(call)
         temp_str, _ = self.get_current_temp(conf)
         is_v = 'data' not in match.group('v_type').lower()
         slot = " (Slot 1)" if "Slot 1" in line else " (Slot 2)" if "Slot 2" in line else ""
-
         body = (f"👤 **呼号**: {call}{info['name']}\n"
                 f"👥 **群组**: {match.group('target').strip()}\n"
                 f"📍 **地区**: {info['loc']}\n"
@@ -280,7 +268,15 @@ if __name__ == "__main__":
     monitor = MMDVMMonitor()
     if len(sys.argv) > 1 and sys.argv[1] == "--test":
         conf = ConfigManager.get_config()
-        ip, _, _ = monitor.get_sys_info()
-        PushService.send(conf, "🔔 测试推送", f"通道测试成功\n🌐 IP: {ip}\n⏰ {datetime.now().strftime('%H:%M:%S')}", is_voice=False, async_mode=False)
+        ip, cpu, mem = monitor.get_sys_info()
+        temp_str, _ = monitor.get_current_temp(conf)
+        test_body = (f"通道测试成功\n"
+                     f"🌐 **内网IP**: {ip}\n"
+                     f"🌡️ **系统温度**: {temp_str}\n"
+                     f"📊 **CPU占用**: {cpu}%\n"
+                     f"💾 **内存占用**: {mem}\n"
+                     f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}")
+        PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
+        print("Success")
     else:
         monitor.run()
