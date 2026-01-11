@@ -1,5 +1,5 @@
-import os, time, json, glob, re, urllib.request, urllib.parse, sys, base64, hmac, hashlib, mmap, subprocess
-from datetime import datetime
+import os, time, json, glob, re, urllib.request, urllib.parse, sys, base64, hmac, hashlib, mmap, subprocess, atexit
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from threading import Semaphore
@@ -41,7 +41,6 @@ class ConfigManager:
 class HamInfoManager:
     def __init__(self, id_file):
         self.id_file = id_file
-        # [移植] 限制并发文件读取数，防止IO争抢
         self._io_lock = Semaphore(4)
         self.geo_map = {
             "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", "Taiwan": "🇹🇼 中国台湾",
@@ -57,7 +56,7 @@ class HamInfoManager:
             "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵🇹 葡萄牙",
             "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", "Netherlands": "🇳🇱 荷兰",
             "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦🇹 奥地利", "Sweden": "🇸🇪 瑞典",
-            "Norway": "🇳🇴 挪威", "Denmark": "🇩🇰 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
+            "Norway": "🇳🇴 挪威", "Denmark": "🇩麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
             "Czech Republic": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰",
             "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 保加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
             "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 克罗地亚", "Serbia": "🇷🇸 塞尔维亚", "Slovenia": "🇸🇮 斯洛文尼亚",
@@ -71,7 +70,7 @@ class HamInfoManager:
             "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
             "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
             "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", "Kenya": "🇰🇪 肯尼亚",
-            "Morocco": "🇲🇦 摩洛哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
+            "Morocco": "🇲🇦 摩纳哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", "Seychelles": "🇸🇨 塞舌尔"
         }
 
@@ -112,7 +111,6 @@ class HamInfoManager:
 class PushService:
     _max_workers = 3
     _executor = ThreadPoolExecutor(max_workers=_max_workers)
-    # [移植] 限制并发推送任务，保护系统资源
     _push_semaphore = Semaphore(_max_workers)
 
     @staticmethod
@@ -146,7 +144,6 @@ class PushService:
 
     @classmethod
     def post_with_retry(cls, url, data=None, is_json=False, retries=2):
-        """[S级加固] 保持强制重试与丢弃机制"""
         for i in range(retries + 1):
             try:
                 req = urllib.request.Request(url, data=data, method='POST') if data else urllib.request.Request(url)
@@ -162,16 +159,22 @@ class PushService:
         if async_mode: cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
         else: cls._do_push_logic(config, type_label, body_text, is_voice)
 
+    @classmethod
+    def shutdown(cls):
+        # [atexit 钩子逻辑实现]
+        cls._executor.shutdown(wait=True)
+
+# 注册 atexit 钩子
+atexit.register(PushService.shutdown)
+
 class MMDVMMonitor:
     def __init__(self):
         self.last_msg = {"call": "", "ts": 0}
         self.last_temp_alert_time = 0
         self.last_temp_check_time = 0
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
-        # 保持 v3.0.4 正则：捕获 voice/data, call, target, dur, loss, ber
         self.re_master = re.compile(r'end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from (?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), (?P<dur>\d+\.?\d*) seconds(?:, (?P<loss>\d+)% packet loss)?(?:, BER: (?P<ber>\d+\.?\d*)%)?', re.IGNORECASE)
 
-    # [移植] 静音时段检测逻辑
     def is_quiet_time(self, conf):
         if not conf.get('quiet_mode', {}).get('enabled'): return False
         now = datetime.now().strftime("%H:%M")
@@ -228,20 +231,25 @@ class MMDVMMonitor:
                 if not log_files: time.sleep(5); continue
                 current_log = max(log_files, key=os.path.getmtime)
                 
-                # [S级加固] 日志轮转保护
-                try:
-                    with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
-                        f.seek(0, 2)
-                        last_rot_check = time.time()
-                        while True:
-                            if time.time() - last_rot_check > 5:
-                                if max(log_files, key=os.path.getmtime) != current_log: break
-                                last_rot_check = time.time()
-                            line = f.readline()
-                            if not line: time.sleep(0.1); continue
-                            self.process_line(line)
-                except (FileNotFoundError, PermissionError, OSError):
-                    time.sleep(1); continue
+                # 获取当前 UTC 日期，用于判断跨天（UTC 0点轮转）
+                last_log_date = datetime.now(timezone.utc).date()
+                
+                with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(0, 2)
+                    while True:
+                        # 检查 UTC 日期是否跨天
+                        current_utc_date = datetime.now(timezone.utc).date()
+                        if current_utc_date != last_log_date:
+                            # 触发轮转，跳出内循环重新打开文件
+                            break
+                        
+                        line = f.readline()
+                        if not line:
+                            time.sleep(0.1)
+                            continue
+                        self.process_line(line)
+            except (FileNotFoundError, PermissionError, OSError):
+                time.sleep(1); continue
             except Exception: time.sleep(5)
 
     def process_line(self, line):
@@ -254,12 +262,9 @@ class MMDVMMonitor:
         call = match.group('call').upper()
         dur = float(match.group('dur'))
 
-        # [移植] 吸收优化版过滤策略
         if self.is_quiet_time(conf): return
-        # 白名单优先：如果设置了白名单且呼号不在其中，则过滤
         focus = conf.get('focus_list', [])
         if focus and call not in focus: return
-        # 黑名单与自身过滤
         if call == conf.get('my_callsign') or call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0):
             return
 
